@@ -307,8 +307,38 @@ def run_gui(
                                 step_delay = current_delay
                                 paused = True
                             except StopIteration:
-                                # animation complete
-                                pass
+                                # animation complete, apply move
+                                if pre_anim_state is not None and selected_pit is not None:
+                                    steps = anim_history.copy()
+                                    turn_history.append(
+                                        (pre_anim_state, selected_pit, anim_player, steps)
+                                    )
+                                result = apply_move(state, selected_pit, rules)
+                                state = result.state
+                                animation = None
+                                anim_step = None
+                                anim_history = []
+                                anim_history_idx = 0
+                                pre_anim_state = None
+                                selected_pit = None
+                                if is_terminal(state):
+                                    game_over = True
+                        elif anim_history and selected_pit is not None:
+                            # at end of replay, apply move
+                            if pre_anim_state is not None:
+                                turn_history.append(
+                                    (pre_anim_state, selected_pit, anim_player, anim_history.copy())
+                                )
+                            result = apply_move(state, selected_pit, rules)
+                            state = result.state
+                            animation = None
+                            anim_step = None
+                            anim_history = []
+                            anim_history_idx = 0
+                            pre_anim_state = None
+                            selected_pit = None
+                            if is_terminal(state):
+                                game_over = True
 
             # advance animation if not paused
             if not paused:
