@@ -25,12 +25,10 @@ def weighted_eval(state: BoardState, player: int) -> float:
     my_pit_total = sum(my_pits)
     opp_pit_total = sum(opp_pits)
 
-    # bonus for pits that can land in store (pit i with i+1 seeds for player 0)
+    # bonus for pits that can land in store (pit i with i+1 seeds)
     store_reach_bonus = 0.0
     for i, seeds in enumerate(my_pits):
-        distance_to_store = 7 - i  # for player 0
-        if player == 1:
-            distance_to_store = 7 - i
+        distance_to_store = i + 1
         if seeds == distance_to_store:
             store_reach_bonus += 0.5
 

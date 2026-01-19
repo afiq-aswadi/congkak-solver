@@ -24,6 +24,7 @@ class BoardState:
 class RuleConfig:
     simultaneous_start: bool
     capture_enabled: bool
+    capture_requires_loop: bool
     forfeit_enabled: bool
     burnt_holes_enabled: bool
 
@@ -33,6 +34,7 @@ class RuleConfig:
         capture_enabled: bool = True,
         forfeit_enabled: bool = True,
         burnt_holes_enabled: bool = False,
+        capture_requires_loop: bool = False,
     ) -> None: ...
     @staticmethod
     def default_rules() -> RuleConfig: ...

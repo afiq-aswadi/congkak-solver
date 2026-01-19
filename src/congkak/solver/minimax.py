@@ -77,7 +77,7 @@ class MinimaxSolver:
                 value, is_exact = tt_result
                 if is_exact:
                     return value, self.tt.get_best_move(state_hash)
-                # for bounds, we still use the value but don't have exact move
+                return value, self.tt.get_best_move(state_hash)
 
         moves = get_legal_moves(state)
         assert moves, f"no legal moves but not terminal: {state}"
