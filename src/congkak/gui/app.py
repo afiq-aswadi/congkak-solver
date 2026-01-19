@@ -150,6 +150,13 @@ def draw_board(
     return pit_rects
 
 
+def draw_speed_indicator(screen: pygame.Surface, font: pygame.font.Font, delay_ms: int) -> None:
+    """Draw animation speed indicator."""
+    speed_text = "Speed: instant" if delay_ms == 0 else f"Speed: {delay_ms}ms  [+/-]"
+    text = font.render(speed_text, True, (100, 100, 100))
+    screen.blit(text, (10, WINDOW_HEIGHT - 30))
+
+
 def draw_game_over(screen: pygame.Surface, font: pygame.font.Font, state: BoardState) -> None:
     """Draw game over overlay."""
     overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -213,6 +220,7 @@ def run_gui(
     anim_step: SowingStep | None = None
     anim_player: int = 0
     step_delay = 0
+    current_delay = animation_delay  # mutable copy for speed adjustment
 
     running = True
     while running:
@@ -224,7 +232,7 @@ def run_gui(
             if step_delay <= 0:
                 try:
                     anim_step = next(animation)
-                    step_delay = animation_delay
+                    step_delay = current_delay
                 except StopIteration:
                     animation = None
                     anim_step = None
@@ -235,12 +243,17 @@ def run_gui(
                     if is_terminal(state):
                         game_over = True
 
-            # during animation, only handle quit events
+            # during animation, handle quit and speed controls
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_q:
-                    running = False
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_q:
+                        running = False
+                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_UP):
+                        current_delay = max(0, current_delay - 50)
+                    elif event.key in (pygame.K_MINUS, pygame.K_DOWN):
+                        current_delay = min(1000, current_delay + 50)
 
             # draw animation frame
             if anim_step is not None:
@@ -254,6 +267,7 @@ def run_gui(
                     active_pit=anim_step.current_pos,
                     seeds_in_hand=anim_step.seeds_in_hand,
                 )
+                draw_speed_indicator(screen, font, current_delay)
             pygame.display.flip()
             continue
 
@@ -273,6 +287,10 @@ def run_gui(
                     animation = None
                     anim_step = None
                     solver.clear_tt()
+                elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_UP):
+                    current_delay = max(0, current_delay - 50)
+                elif event.key in (pygame.K_MINUS, pygame.K_DOWN):
+                    current_delay = min(1000, current_delay + 50)
 
             if event.type == pygame.MOUSEBUTTONDOWN and not game_over and not ai_thinking:
                 current_type = player_types[state.current_player]
@@ -283,7 +301,7 @@ def run_gui(
                     )
                     for pit_idx, rect in pit_rects.items():
                         if rect.collidepoint(pos) and pit_idx in legal_moves:
-                            if animation_delay > 0:
+                            if current_delay > 0:
                                 selected_pit = pit_idx
                                 anim_player = state.current_player
                                 animation = animate_sowing(state, pit_idx, rules)
@@ -304,7 +322,7 @@ def run_gui(
 
             move = solver.get_best_move(state)
             if move is not None:
-                if animation_delay > 0:
+                if current_delay > 0:
                     selected_pit = move
                     anim_player = state.current_player
                     animation = animate_sowing(state, move, rules)
@@ -320,6 +338,7 @@ def run_gui(
 
         # draw
         draw_board(screen, font, state.pits, state.current_player, legal_moves, selected_pit)
+        draw_speed_indicator(screen, font, current_delay)
 
         if game_over:
             draw_game_over(screen, font, state)
