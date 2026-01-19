@@ -463,6 +463,7 @@ def run_gui(
                     step_delay = current_delay
                     paused = True
                     game_over = False
+                    break  # exit event loop to enter animation mode
 
             if event.type == pygame.MOUSEBUTTONDOWN and not game_over and not ai_thinking:
                 current_type = player_types[state.current_player]
@@ -488,6 +489,10 @@ def run_gui(
                                 if is_terminal(state):
                                     game_over = True
                             break
+
+        # if we just restored animation state, skip to animation handling
+        if anim_history:
+            continue
 
         # AI move
         if not game_over and player_types[state.current_player] == "ai" and not ai_thinking:
