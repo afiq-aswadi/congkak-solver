@@ -271,12 +271,11 @@ def run_gui(
                         current_delay = min(1000, current_delay + 50)
                     elif event.key == pygame.K_SPACE:
                         paused = not paused
-                    elif event.key == pygame.K_BACKSPACE:
+                    elif event.key in (pygame.K_BACKSPACE, pygame.K_LEFT):
                         if anim_history_idx > 0:
                             # go back one step in current animation
                             anim_history_idx -= 1
                             anim_step = anim_history[anim_history_idx]
-                            animation = None  # stop generator, replay from history
                             step_delay = current_delay
                             paused = True
                         elif turn_history:
@@ -289,10 +288,27 @@ def run_gui(
                             anim_history_idx = len(prev_steps) - 1
                             anim_step = prev_steps[anim_history_idx] if prev_steps else None
                             animation = None
-                            pre_anim_state = None
+                            pre_anim_state = prev_state
                             step_delay = current_delay
                             paused = True
-                            game_over = False  # in case we rewound from game over
+                            game_over = False
+                    elif event.key == pygame.K_RIGHT:
+                        # go forward one step
+                        if anim_history_idx < len(anim_history):
+                            anim_step = anim_history[anim_history_idx]
+                            anim_history_idx += 1
+                            step_delay = current_delay
+                            paused = True
+                        elif animation is not None:
+                            try:
+                                anim_step = next(animation)
+                                anim_history.append(anim_step)
+                                anim_history_idx = len(anim_history)
+                                step_delay = current_delay
+                                paused = True
+                            except StopIteration:
+                                # animation complete
+                                pass
 
             # advance animation if not paused
             if not paused:
@@ -324,6 +340,22 @@ def run_gui(
                             selected_pit = None
                             if is_terminal(state):
                                 game_over = True
+                    else:
+                        # finished replaying from history, apply move
+                        if pre_anim_state is not None and selected_pit is not None:
+                            turn_history.append(
+                                (pre_anim_state, selected_pit, anim_player, anim_history.copy())
+                            )
+                        result = apply_move(state, selected_pit, rules)
+                        state = result.state
+                        animation = None
+                        anim_step = None
+                        anim_history = []
+                        anim_history_idx = 0
+                        pre_anim_state = None
+                        selected_pit = None
+                        if is_terminal(state):
+                            game_over = True
 
                     # set delay for next step
                     if anim_step is not None:
@@ -347,7 +379,7 @@ def run_gui(
                 )
                 draw_speed_indicator(screen, font, current_delay)
                 if paused:
-                    pause_text = font.render("PAUSED [Space]  Rewind [Bksp]", True, (200, 50, 50))
+                    pause_text = font.render("PAUSED [Space]  [Left/Right]", True, (200, 50, 50))
                     screen.blit(
                         pause_text,
                         (WINDOW_WIDTH // 2 - pause_text.get_width() // 2, WINDOW_HEIGHT - 60),
@@ -413,7 +445,11 @@ def run_gui(
                     current_delay = max(0, current_delay - 50)
                 elif event.key in (pygame.K_MINUS, pygame.K_DOWN):
                     current_delay = min(1000, current_delay + 50)
-                elif event.key == pygame.K_BACKSPACE and turn_history and not ai_thinking:
+                elif (
+                    event.key in (pygame.K_BACKSPACE, pygame.K_LEFT)
+                    and turn_history
+                    and not ai_thinking
+                ):
                     # go back to previous turn from normal state
                     prev_state, prev_move, prev_player, prev_steps = turn_history.pop()
                     state = prev_state
@@ -423,7 +459,7 @@ def run_gui(
                     anim_history_idx = len(prev_steps) - 1
                     anim_step = prev_steps[anim_history_idx] if prev_steps else None
                     animation = None
-                    pre_anim_state = None
+                    pre_anim_state = prev_state
                     step_delay = current_delay
                     paused = True
                     game_over = False
