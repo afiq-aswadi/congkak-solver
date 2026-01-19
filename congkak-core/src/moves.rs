@@ -74,6 +74,10 @@ pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveRes
     let my_store = player_store(player);
     let opp_store = opponent_store(player);
 
+    assert!(pit < pits.len(), "pit out of range: {pit}");
+    assert!(is_player_pit(pit, player), "pit does not belong to player: {pit}");
+    assert!(pits[pit] > 0, "pit is empty: {pit}");
+
     // pick up seeds from selected pit
     let mut seeds = pits[pit];
     pits[pit] = 0;

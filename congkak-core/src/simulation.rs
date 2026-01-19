@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 #[pyfunction]
 pub fn random_playout(state: &BoardState, rules: &RuleConfig, seed: u64) -> i8 {
     let mut current = *state;
-    let mut rng_state = seed;
+    let mut rng_state = if seed == 0 { 0x9E3779B97F4A7C15 } else { seed };
 
     while !is_terminal(&current) {
         let moves = get_legal_moves(&current);
