@@ -107,8 +107,10 @@ def draw_board(
 
         if pit_idx == active_pit:
             color = ACTIVE_COLOR
+        elif pit_idx == selected_pit:
+            color = HIGHLIGHT_COLOR
         elif pit_idx in legal_moves:
-            color = HIGHLIGHT_COLOR if selected_pit == pit_idx else (140, 100, 60)
+            color = (140, 100, 60)
         else:
             color = PIT_COLOR
 
@@ -125,8 +127,10 @@ def draw_board(
 
         if pit_idx == active_pit:
             color = ACTIVE_COLOR
+        elif pit_idx == selected_pit:
+            color = HIGHLIGHT_COLOR
         elif pit_idx in legal_moves:
-            color = HIGHLIGHT_COLOR if selected_pit == pit_idx else (140, 100, 60)
+            color = (140, 100, 60)
         else:
             color = PIT_COLOR
 
@@ -237,33 +241,19 @@ def run_gui(
     anim_player: int = 0
     step_delay = 0
     current_delay = animation_delay  # mutable copy for speed adjustment
+    paused = False
+    anim_history: list[SowingStep] = []  # history for rewind
+    anim_history_idx = 0  # current position in history during replay
+    pending_move: int | None = None  # pit selected, waiting to start animation
+    pending_move_delay = 0  # countdown before animation starts
 
     running = True
     while running:
         dt = clock.tick(60)
 
         # handle animation
-        if animation is not None:
-            step_delay -= dt
-            if step_delay <= 0:
-                try:
-                    anim_step = next(animation)
-                    # add extra delay for significant events
-                    if anim_step.action in ("relay", "extra_turn", "capture", "forfeit"):
-                        step_delay = current_delay * 3
-                    else:
-                        step_delay = current_delay
-                except StopIteration:
-                    animation = None
-                    anim_step = None
-                    # apply the final state
-                    result = apply_move(state, selected_pit, rules)
-                    state = result.state
-                    selected_pit = None
-                    if is_terminal(state):
-                        game_over = True
-
-            # during animation, handle quit and speed controls
+        if animation is not None or anim_history_idx < len(anim_history):
+            # handle events during animation
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -274,6 +264,47 @@ def run_gui(
                         current_delay = max(0, current_delay - 50)
                     elif event.key in (pygame.K_MINUS, pygame.K_DOWN):
                         current_delay = min(1000, current_delay + 50)
+                    elif event.key == pygame.K_SPACE:
+                        paused = not paused
+                    elif event.key == pygame.K_BACKSPACE and anim_history_idx > 0:
+                        # go back one step
+                        anim_history_idx -= 1
+                        anim_step = anim_history[anim_history_idx]
+                        animation = None  # stop generator, replay from history
+                        step_delay = current_delay
+                        paused = True  # pause after rewinding
+
+            # advance animation if not paused
+            if not paused:
+                step_delay -= dt
+                if step_delay <= 0:
+                    # replaying from history or advancing generator
+                    if anim_history_idx < len(anim_history):
+                        anim_step = anim_history[anim_history_idx]
+                        anim_history_idx += 1
+                    elif animation is not None:
+                        try:
+                            anim_step = next(animation)
+                            anim_history.append(anim_step)
+                            anim_history_idx = len(anim_history)
+                        except StopIteration:
+                            animation = None
+                            anim_step = None
+                            anim_history = []
+                            anim_history_idx = 0
+                            # apply the final state
+                            result = apply_move(state, selected_pit, rules)
+                            state = result.state
+                            selected_pit = None
+                            if is_terminal(state):
+                                game_over = True
+
+                    # set delay for next step
+                    if anim_step is not None:
+                        if anim_step.action in ("relay", "extra_turn", "capture", "forfeit"):
+                            step_delay = current_delay * 3
+                        else:
+                            step_delay = current_delay
 
             # draw animation frame
             if anim_step is not None:
@@ -289,6 +320,46 @@ def run_gui(
                     action=anim_step.action,
                 )
                 draw_speed_indicator(screen, font, current_delay)
+                if paused:
+                    pause_text = font.render("PAUSED [Space]  Rewind [Bksp]", True, (200, 50, 50))
+                    screen.blit(
+                        pause_text,
+                        (WINDOW_WIDTH // 2 - pause_text.get_width() // 2, WINDOW_HEIGHT - 60),
+                    )
+            pygame.display.flip()
+            continue
+
+        # handle pending move (show selected pit before animation starts)
+        if pending_move is not None:
+            pending_move_delay -= dt
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_q:
+                    running = False
+
+            if pending_move_delay <= 0:
+                # start animation
+                selected_pit = pending_move
+                animation = animate_sowing(state, pending_move, rules)
+                anim_history = []
+                anim_history_idx = 0
+                paused = False
+                step_delay = 0
+                pending_move = None
+                continue  # go to animation handling
+
+            # draw with selected pit highlighted
+            draw_board(screen, font, state.pits, state.current_player, [], pending_move)
+            draw_speed_indicator(screen, font, current_delay)
+            # show "AI plays pit X" indicator
+            pit_start, _ = state.player_pit_range(state.current_player)
+            pit_label = pending_move - pit_start + 1
+            choice_text = font.render(f"AI chooses pit {pit_label}", True, HIGHLIGHT_COLOR)
+            screen.blit(
+                choice_text,
+                (WINDOW_WIDTH // 2 - choice_text.get_width() // 2, WINDOW_HEIGHT // 2 - 24),
+            )
             pygame.display.flip()
             continue
 
@@ -326,6 +397,9 @@ def run_gui(
                                 selected_pit = pit_idx
                                 anim_player = state.current_player
                                 animation = animate_sowing(state, pit_idx, rules)
+                                anim_history = []
+                                anim_history_idx = 0
+                                paused = False
                                 step_delay = 0
                             else:
                                 result = apply_move(state, pit_idx, rules)
@@ -344,10 +418,10 @@ def run_gui(
             move = solver.get_best_move(state)
             if move is not None:
                 if current_delay > 0:
-                    selected_pit = move
+                    # show selected pit first, then start animation
+                    pending_move = move
+                    pending_move_delay = current_delay * 3
                     anim_player = state.current_player
-                    animation = animate_sowing(state, move, rules)
-                    step_delay = 0
                 else:
                     result = apply_move(state, move, rules)
                     state = result.state
