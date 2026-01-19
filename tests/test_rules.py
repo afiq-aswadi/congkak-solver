@@ -27,13 +27,13 @@ def test_legal_moves_player1() -> None:
 
 
 def test_extra_turn_on_store() -> None:
-    # pit 6 with 1 seed -> lands in store (14)
+    # clockwise: pit 0 with 1 seed -> lands in P0 store (14)
     pits = [0] * 16
-    pits[6] = 1
+    pits[0] = 1
     state = BoardState.from_pits(pits, 0)
     rules = RuleConfig.default_rules()
 
-    result = apply_move(state, 6, rules)
+    result = apply_move(state, 0, rules)
     assert result.extra_turn
     assert result.state.current_player == 0
     assert result.state.pits[14] == 1
@@ -41,29 +41,31 @@ def test_extra_turn_on_store() -> None:
 
 def test_relay_sowing() -> None:
     # landing in a pit with seeds -> relay continues
+    # clockwise: 3 -> 2 -> 1 (lands in pit 1)
     pits = [0] * 16
-    pits[0] = 2  # 2 seeds in pit 0
-    pits[2] = 3  # 3 seeds in pit 2 (will be hit by relay)
+    pits[3] = 2  # 2 seeds in pit 3
+    pits[1] = 3  # 3 seeds in pit 1 (will be hit by relay)
     state = BoardState.from_pits(pits, 0)
     rules = RuleConfig.default_rules()
 
-    result = apply_move(state, 0, rules)
-    # pit 0 -> drop in 1, drop in 2 (now has 4 seeds) -> relay picks up
-    # -> drop in 3, 4, 5, 6 -> end
-    assert result.state.pits[0] == 0
-    assert result.state.pits[1] == 1
-    assert result.state.pits[2] == 0  # picked up for relay
+    result = apply_move(state, 3, rules)
+    # pit 3 -> drop in 2, drop in 1 (now 4 seeds) -> relay picks up
+    # -> drop in 0, 14, 13, 12 -> end
+    assert result.state.pits[3] == 0
+    assert result.state.pits[2] == 1
+    assert result.state.pits[1] == 0  # picked up for relay
 
 
 def test_capture() -> None:
     # landing in own empty pit captures opposite
+    # clockwise: pit 6 with 3 seeds: 6 -> 5 -> 4 -> 3 (lands on pit 3)
     pits = [0] * 16
-    pits[0] = 3  # 3 seeds: lands on pit 3 (own, empty)
+    pits[6] = 3  # 3 seeds: lands on pit 3 (own, empty)
     pits[10] = 5  # opposite of pit 3 (13-3=10) has 5 seeds
     state = BoardState.from_pits(pits, 0)
     rules = RuleConfig.default_rules()
 
-    result = apply_move(state, 0, rules)
+    result = apply_move(state, 6, rules)
     # lands on pit 3 (empty), captures opposite (pit 10) + itself
     assert result.captured == 6  # 5 from opposite + 1 (the landing seed)
     assert result.state.pits[14] == 6  # captured seeds go to store
@@ -72,13 +74,14 @@ def test_capture() -> None:
 
 
 def test_capture_disabled() -> None:
+    # clockwise: pit 6 with 3 seeds lands on pit 3
     pits = [0] * 16
-    pits[0] = 3
+    pits[6] = 3
     pits[10] = 5
     state = BoardState.from_pits(pits, 0)
     rules = RuleConfig(capture_enabled=False)
 
-    result = apply_move(state, 0, rules)
+    result = apply_move(state, 6, rules)
     assert result.captured == 0
     assert result.state.pits[3] == 1  # seed stays
     assert result.state.pits[10] == 5  # opposite untouched
@@ -86,24 +89,26 @@ def test_capture_disabled() -> None:
 
 def test_forfeit() -> None:
     # landing in opponent empty pit forfeits seed
+    # clockwise: pit 0 with 8 seeds: 0->14->13->12->11->10->9->8->7 (opponent's empty pit)
     pits = [0] * 16
-    pits[5] = 3  # 3 seeds: 5->6->14->7 (opponent's empty pit)
+    pits[0] = 8
     state = BoardState.from_pits(pits, 0)
     rules = RuleConfig.default_rules()
 
-    result = apply_move(state, 5, rules)
+    result = apply_move(state, 0, rules)
     # lands on pit 7 (opponent, empty) -> forfeit to opponent store
     assert result.state.pits[7] == 0  # seed forfeited
     assert result.state.pits[15] == 1  # opponent store gets it
 
 
 def test_forfeit_disabled() -> None:
+    # clockwise: pit 0 with 8 seeds lands on pit 7 (opponent's pit)
     pits = [0] * 16
-    pits[5] = 3
+    pits[0] = 8
     state = BoardState.from_pits(pits, 0)
     rules = RuleConfig(forfeit_enabled=False)
 
-    result = apply_move(state, 5, rules)
+    result = apply_move(state, 0, rules)
     assert result.state.pits[7] == 1  # seed stays
     assert result.state.pits[15] == 0  # opponent store empty
 

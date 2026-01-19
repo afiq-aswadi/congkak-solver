@@ -16,13 +16,8 @@ pub struct MoveResult {
 
 /// Get the opposite pit index for capture
 fn opposite_pit(pit: usize) -> usize {
-    // Pits 0-6 are opposite to 13-7
-    // Pits 7-13 are opposite to 6-0
-    if pit < 7 {
-        13 - pit
-    } else {
-        13 - pit + 7
-    }
+    // Pits 0-6 are opposite to 13-7, pits 7-13 are opposite to 6-0
+    13 - pit
 }
 
 /// Check if a pit belongs to a player
@@ -52,21 +47,20 @@ fn opponent_store(player: u8) -> usize {
     }
 }
 
-/// Get the next position in counter-clockwise sowing order.
+/// Get the next position in clockwise sowing order (from P0's perspective).
 /// Board layout:
-///      13  12  11  10   9   8   7
-/// [15]                            [14]
-///       0   1   2   3   4   5   6
+/// [14]  13  12  11  10   9   8   7  [15]
+///        0   1   2   3   4   5   6
 ///
-/// Counter-clockwise: 0->1->...->6->14->7->8->...->13->15->0
+/// Clockwise: 6->5->...->0->14->13->12->...->7->15->6
 fn next_position(pos: usize) -> usize {
     match pos {
-        0..=5 => pos + 1,   // P0 pits
-        6 => P0_STORE,      // P0 pit 6 -> P0 store
-        14 => 7,            // P0 store -> P1 pit 7
-        7..=12 => pos + 1,  // P1 pits
-        13 => P1_STORE,     // P1 pit 13 -> P1 store
-        15 => 0,            // P1 store -> P0 pit 0
+        1..=6 => pos - 1,   // P0 pits: going left toward store
+        0 => P0_STORE,      // P0 pit 0 -> P0 store (left side)
+        14 => 13,           // P0 store -> P1 pit 13
+        8..=13 => pos - 1,  // P1 pits: going left toward their store
+        7 => P1_STORE,      // P1 pit 7 -> P1 store (right side)
+        15 => 6,            // P1 store -> P0 pit 6
         _ => unreachable!(),
     }
 }
@@ -236,20 +230,21 @@ mod tests {
     fn test_relay_sowing() {
         let state = BoardState::initial();
         let rules = RuleConfig::default();
-        // move from pit 0 with 7 seeds
+        // move from pit 0 with 7 seeds (clockwise: 0->14->13->12->11->10->9->8)
         let result = apply_move(&state, 0, &rules);
-        // should land in pit 7, which has 8 seeds now, so relay continues
+        // seeds deposited through store and into P1's pits, relay continues from pit 8
         assert!(result.state.pits[0] == 0);
     }
 
     #[test]
     fn test_extra_turn_on_store() {
         // create a state where moving will land exactly in store
+        // clockwise sowing: 0 -> P0_STORE (14), so 1 seed from pit 0 lands in store
         let mut pits = [0u8; 16];
-        pits[6] = 1; // one seed in pit 6, will land in P0's store (14)
+        pits[0] = 1;
         let state = BoardState::from_pits(pits, 0);
         let rules = RuleConfig::default();
-        let result = apply_move(&state, 6, &rules);
+        let result = apply_move(&state, 0, &rules);
         assert!(result.extra_turn);
         assert_eq!(result.state.current_player, 0); // same player
         assert_eq!(result.state.pits[P0_STORE], 1);

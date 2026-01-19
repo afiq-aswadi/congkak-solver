@@ -37,3 +37,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ty.rules]
 unresolved-import = "error"
+
+[dependency-groups]
+dev = [
+    "maturin>=1.11.5",
+]
