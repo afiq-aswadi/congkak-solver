@@ -257,7 +257,7 @@ def run_gui(
         dt = clock.tick(60)
 
         # handle animation
-        if animation is not None or anim_history_idx < len(anim_history):
+        if animation is not None or anim_history_idx < len(anim_history) or anim_step is not None:
             # handle events during animation
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -313,6 +313,7 @@ def run_gui(
                                     turn_history.append(
                                         (pre_anim_state, selected_pit, anim_player, steps)
                                     )
+                                assert selected_pit is not None
                                 result = apply_move(state, selected_pit, rules)
                                 state = result.state
                                 animation = None
@@ -329,6 +330,7 @@ def run_gui(
                                 turn_history.append(
                                     (pre_anim_state, selected_pit, anim_player, anim_history.copy())
                                 )
+                            assert selected_pit is not None
                             result = apply_move(state, selected_pit, rules)
                             state = result.state
                             animation = None
@@ -365,6 +367,7 @@ def run_gui(
                             anim_history_idx = 0
                             pre_anim_state = None
                             # apply the final state
+                            assert selected_pit is not None
                             result = apply_move(state, selected_pit, rules)
                             state = result.state
                             selected_pit = None
@@ -376,6 +379,7 @@ def run_gui(
                             turn_history.append(
                                 (pre_anim_state, selected_pit, anim_player, anim_history.copy())
                             )
+                        assert selected_pit is not None
                         result = apply_move(state, selected_pit, rules)
                         state = result.state
                         animation = None
