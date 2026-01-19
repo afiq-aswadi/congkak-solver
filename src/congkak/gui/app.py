@@ -247,6 +247,11 @@ def run_gui(
     pending_move: int | None = None  # pit selected, waiting to start animation
     pending_move_delay = 0  # countdown before animation starts
 
+    # turn history for rewinding to previous turns
+    # each entry: (state_before_move, move, player, animation_steps)
+    turn_history: list[tuple[BoardState, int, int, list[SowingStep]]] = []
+    pre_anim_state: BoardState | None = None  # state before current animation
+
     running = True
     while running:
         dt = clock.tick(60)
@@ -266,13 +271,28 @@ def run_gui(
                         current_delay = min(1000, current_delay + 50)
                     elif event.key == pygame.K_SPACE:
                         paused = not paused
-                    elif event.key == pygame.K_BACKSPACE and anim_history_idx > 0:
-                        # go back one step
-                        anim_history_idx -= 1
-                        anim_step = anim_history[anim_history_idx]
-                        animation = None  # stop generator, replay from history
-                        step_delay = current_delay
-                        paused = True  # pause after rewinding
+                    elif event.key == pygame.K_BACKSPACE:
+                        if anim_history_idx > 0:
+                            # go back one step in current animation
+                            anim_history_idx -= 1
+                            anim_step = anim_history[anim_history_idx]
+                            animation = None  # stop generator, replay from history
+                            step_delay = current_delay
+                            paused = True
+                        elif turn_history:
+                            # go back to previous turn
+                            prev_state, prev_move, prev_player, prev_steps = turn_history.pop()
+                            state = prev_state
+                            selected_pit = prev_move
+                            anim_player = prev_player
+                            anim_history = prev_steps
+                            anim_history_idx = len(prev_steps) - 1
+                            anim_step = prev_steps[anim_history_idx] if prev_steps else None
+                            animation = None
+                            pre_anim_state = None
+                            step_delay = current_delay
+                            paused = True
+                            game_over = False  # in case we rewound from game over
 
             # advance animation if not paused
             if not paused:
@@ -288,10 +308,16 @@ def run_gui(
                             anim_history.append(anim_step)
                             anim_history_idx = len(anim_history)
                         except StopIteration:
+                            # save completed turn to history
+                            if pre_anim_state is not None and selected_pit is not None:
+                                turn_history.append(
+                                    (pre_anim_state, selected_pit, anim_player, anim_history.copy())
+                                )
                             animation = None
                             anim_step = None
                             anim_history = []
                             anim_history_idx = 0
+                            pre_anim_state = None
                             # apply the final state
                             result = apply_move(state, selected_pit, rules)
                             state = result.state
@@ -378,11 +404,29 @@ def run_gui(
                     ai_thinking = False
                     animation = None
                     anim_step = None
+                    anim_history = []
+                    anim_history_idx = 0
+                    turn_history = []
+                    pre_anim_state = None
                     solver.clear_tt()
                 elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_UP):
                     current_delay = max(0, current_delay - 50)
                 elif event.key in (pygame.K_MINUS, pygame.K_DOWN):
                     current_delay = min(1000, current_delay + 50)
+                elif event.key == pygame.K_BACKSPACE and turn_history and not ai_thinking:
+                    # go back to previous turn from normal state
+                    prev_state, prev_move, prev_player, prev_steps = turn_history.pop()
+                    state = prev_state
+                    selected_pit = prev_move
+                    anim_player = prev_player
+                    anim_history = prev_steps
+                    anim_history_idx = len(prev_steps) - 1
+                    anim_step = prev_steps[anim_history_idx] if prev_steps else None
+                    animation = None
+                    pre_anim_state = None
+                    step_delay = current_delay
+                    paused = True
+                    game_over = False
 
             if event.type == pygame.MOUSEBUTTONDOWN and not game_over and not ai_thinking:
                 current_type = player_types[state.current_player]
@@ -394,6 +438,7 @@ def run_gui(
                     for pit_idx, rect in pit_rects.items():
                         if rect.collidepoint(pos) and pit_idx in legal_moves:
                             if current_delay > 0:
+                                pre_anim_state = state
                                 selected_pit = pit_idx
                                 anim_player = state.current_player
                                 animation = animate_sowing(state, pit_idx, rules)
@@ -419,6 +464,7 @@ def run_gui(
             if move is not None:
                 if current_delay > 0:
                     # show selected pit first, then start animation
+                    pre_anim_state = state
                     pending_move = move
                     pending_move_delay = current_delay * 3
                     anim_player = state.current_player
