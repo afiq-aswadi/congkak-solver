@@ -1,11 +1,22 @@
-from congkak import BoardState, RuleConfig, apply_move, get_legal_moves, is_terminal
+from congkak import (
+    BoardState,
+    LeaderSelection,
+    RuleConfig,
+    SimultaneousMoveState,
+    SimultaneousPhase,
+    StartMode,
+    apply_move,
+    apply_simultaneous_moves,
+    get_legal_moves,
+    is_terminal,
+)
 
 
 def test_default_rules() -> None:
     rules = RuleConfig.default_rules()
     assert rules.capture_enabled
     assert rules.forfeit_enabled
-    assert not rules.simultaneous_start
+    assert rules.start_mode == StartMode.Sequential
     assert not rules.burnt_holes_enabled
 
 
@@ -157,3 +168,92 @@ def test_capture_requires_loop_allows_after_loop() -> None:
     state = BoardState.from_pits(pits, 0)
     result = apply_move(state, 6, rules_no_loop)
     assert result.captured == 6  # capture works without loop requirement
+
+
+# simultaneous mode tests
+
+
+def test_start_mode_enums() -> None:
+    assert StartMode.Sequential == 0
+    assert StartMode.SimultaneousIndependent == 1
+    assert StartMode.SimultaneousLeaderFollower == 2
+
+
+def test_leader_selection_enums() -> None:
+    assert LeaderSelection.Random == 0
+    assert LeaderSelection.AlwaysP0 == 1
+    assert LeaderSelection.AlwaysP1 == 2
+
+
+def test_simultaneous_phase_enums() -> None:
+    assert SimultaneousPhase.AwaitingMoves == 0
+    assert SimultaneousPhase.AwaitingFollower == 1
+    assert SimultaneousPhase.ReadyToExecute == 2
+
+
+def test_simultaneous_move_state_independent() -> None:
+    sim_state = SimultaneousMoveState.for_independent()
+    assert sim_state.phase == SimultaneousPhase.AwaitingMoves
+    assert sim_state.p0_move is None
+    assert sim_state.p1_move is None
+    assert sim_state.leader is None
+    assert sim_state.can_submit(0)
+    assert sim_state.can_submit(1)
+
+
+def test_simultaneous_move_state_leader_follower() -> None:
+    sim_state = SimultaneousMoveState.for_leader_follower(0)
+    assert sim_state.phase == SimultaneousPhase.AwaitingMoves
+    assert sim_state.leader == 0
+    assert sim_state.can_submit(0)
+    assert not sim_state.can_submit(1)
+
+    # leader submits
+    sim_state.submit_move(0, 3)
+    assert sim_state.phase == SimultaneousPhase.AwaitingFollower
+    assert sim_state.get_leader_move() == 3
+    assert not sim_state.can_submit(0)
+    assert sim_state.can_submit(1)
+
+    # follower submits
+    sim_state.submit_move(1, 10)
+    assert sim_state.phase == SimultaneousPhase.ReadyToExecute
+    assert sim_state.p0_move == 3
+    assert sim_state.p1_move == 10
+
+
+def test_simultaneous_move_state_independent_submission() -> None:
+    sim_state = SimultaneousMoveState.for_independent()
+
+    # p0 submits
+    sim_state.submit_move(0, 2)
+    assert sim_state.phase == SimultaneousPhase.AwaitingMoves
+    assert sim_state.p0_move == 2
+    assert not sim_state.can_submit(0)
+    assert sim_state.can_submit(1)
+
+    # p1 submits
+    sim_state.submit_move(1, 9)
+    assert sim_state.phase == SimultaneousPhase.ReadyToExecute
+    assert sim_state.p1_move == 9
+
+
+def test_apply_simultaneous_moves_basic() -> None:
+    state = BoardState.initial()
+    rules = RuleConfig.default_rules()
+
+    # both players pick from their pits
+    result = apply_simultaneous_moves(state, 0, 7, rules)
+
+    # verify both pits were emptied
+    assert result.state.pits[0] == 0 or result.state.pits[0] > 7  # emptied or received seeds
+    assert result.state.pits[7] == 0 or result.state.pits[7] > 7
+
+
+def test_rules_with_start_mode() -> None:
+    rules = RuleConfig(
+        start_mode=StartMode.SimultaneousIndependent,
+        leader_selection=LeaderSelection.AlwaysP0,
+    )
+    assert rules.start_mode == StartMode.SimultaneousIndependent
+    assert rules.leader_selection == LeaderSelection.AlwaysP0

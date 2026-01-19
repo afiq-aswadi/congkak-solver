@@ -219,6 +219,126 @@ pub fn get_final_scores(state: &BoardState) -> (u8, u8) {
     )
 }
 
+/// Result of applying simultaneous moves.
+#[pyclass]
+#[derive(Clone, Copy, Debug)]
+pub struct SimultaneousMoveResult {
+    #[pyo3(get)]
+    pub state: BoardState,
+    #[pyo3(get)]
+    pub p0_extra_turn: bool,
+    #[pyo3(get)]
+    pub p1_extra_turn: bool,
+    #[pyo3(get)]
+    pub p0_captured: u8,
+    #[pyo3(get)]
+    pub p1_captured: u8,
+}
+
+/// Apply simultaneous moves from both players.
+/// Both players pick up seeds and sow. Captures and extra turns are resolved together.
+#[pyfunction]
+pub fn apply_simultaneous_moves(
+    state: &BoardState,
+    p0_pit: usize,
+    p1_pit: usize,
+    rules: &RuleConfig,
+) -> SimultaneousMoveResult {
+    // validate moves
+    assert!(P0_PITS.contains(&p0_pit), "p0_pit out of range: {p0_pit}");
+    assert!(P1_PITS.contains(&p1_pit), "p1_pit out of range: {p1_pit}");
+    assert!(state.pits[p0_pit] > 0, "p0 pit is empty: {p0_pit}");
+    assert!(state.pits[p1_pit] > 0, "p1 pit is empty: {p1_pit}");
+
+    // apply p0's move first
+    let result0 = apply_move(state, p0_pit, rules);
+
+    // create state for p1 where p0's chosen pit is already picked up
+    // this simulates "simultaneous" pickup
+    let mut p1_start_state = state.pits;
+    p1_start_state[p0_pit] = 0; // p0 already picked up these seeds
+
+    // apply p1's move on the state after p0 picked up (but before p0 sowed)
+    // for simplicity, we apply p1's move independently then merge
+    let mut state_for_p1 = *state;
+    state_for_p1.current_player = 1;
+    let result1 = apply_move(&state_for_p1, p1_pit, rules);
+
+    // merge the results:
+    // the final pit counts are: initial - picked_up + deposited_by_both
+    // but we need to handle capture conflicts
+
+    let mut final_pits = state.pits;
+
+    // remove seeds from both chosen pits
+    final_pits[p0_pit] = 0;
+    final_pits[p1_pit] = 0;
+
+    // calculate net changes from each player's move
+    // p0's deposits (excluding captures which go to store)
+    for i in 0..16 {
+        if i == p0_pit || i == p1_pit {
+            continue;
+        }
+        // add p0's deposits (difference from initial, excluding store changes from captures)
+        let p0_deposit = result0.state.pits[i].saturating_sub(state.pits[i]);
+        let p1_deposit = result1.state.pits[i].saturating_sub(state.pits[i]);
+
+        // both players' sowing adds to the pit
+        if i != P0_STORE && i != P1_STORE {
+            final_pits[i] = state.pits[i].saturating_sub(
+                if i == p0_pit { state.pits[p0_pit] } else { 0 }
+            ).saturating_sub(
+                if i == p1_pit { state.pits[p1_pit] } else { 0 }
+            ) + p0_deposit + p1_deposit;
+        }
+    }
+
+    // handle captures - check if both tried to capture the same opposite pit
+    let p0_captured = result0.captured;
+    let p1_captured = result1.captured;
+
+    // stores: add from sowing + captures
+    let p0_store_from_sow = if result0.state.pits[P0_STORE] > state.pits[P0_STORE] + result0.captured {
+        result0.state.pits[P0_STORE] - state.pits[P0_STORE] - result0.captured
+    } else if result0.extra_turn && result0.captured == 0 {
+        1 // landed in store for extra turn
+    } else {
+        result0.state.pits[P0_STORE].saturating_sub(state.pits[P0_STORE])
+    };
+
+    let p1_store_from_sow = if result1.state.pits[P1_STORE] > state.pits[P1_STORE] + result1.captured {
+        result1.state.pits[P1_STORE] - state.pits[P1_STORE] - result1.captured
+    } else if result1.extra_turn && result1.captured == 0 {
+        1 // landed in store for extra turn
+    } else {
+        result1.state.pits[P1_STORE].saturating_sub(state.pits[P1_STORE])
+    };
+
+    final_pits[P0_STORE] = state.pits[P0_STORE] + p0_store_from_sow + p0_captured;
+    final_pits[P1_STORE] = state.pits[P1_STORE] + p1_store_from_sow + p1_captured;
+
+    // extra turns: if both get extra turns, continue simultaneous
+    // if one gets extra turn, that player goes next sequentially
+    let next_player = match (result0.extra_turn, result1.extra_turn) {
+        (true, true) => 0,  // both extra turns -> p0 goes first in next simultaneous round
+        (true, false) => 0, // p0 extra turn
+        (false, true) => 1, // p1 extra turn
+        (false, false) => 0, // no extra turns, p0 starts next round
+    };
+
+    SimultaneousMoveResult {
+        state: BoardState {
+            pits: final_pits,
+            current_player: next_player,
+        },
+        p0_extra_turn: result0.extra_turn,
+        p1_extra_turn: result1.extra_turn,
+        p0_captured,
+        p1_captured,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

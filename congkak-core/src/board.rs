@@ -119,3 +119,145 @@ impl Default for BoardState {
         Self::initial()
     }
 }
+
+/// Phase of simultaneous move collection.
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SimultaneousPhase {
+    /// Waiting for both players to submit moves (independent mode)
+    /// or waiting for leader to commit (leader-follower mode).
+    #[default]
+    AwaitingMoves = 0,
+    /// Leader has committed, waiting for follower (leader-follower mode only).
+    AwaitingFollower = 1,
+    /// Both moves collected, ready to execute simultaneously.
+    ReadyToExecute = 2,
+}
+
+/// Tracks simultaneous move state (separate from BoardState to keep it hashable).
+#[pyclass]
+#[derive(Clone, Copy, Debug)]
+pub struct SimultaneousMoveState {
+    #[pyo3(get)]
+    pub phase: SimultaneousPhase,
+    #[pyo3(get)]
+    pub p0_move: Option<usize>,
+    #[pyo3(get)]
+    pub p1_move: Option<usize>,
+    /// The leader player (0 or 1) for leader-follower mode, None for independent.
+    #[pyo3(get)]
+    pub leader: Option<u8>,
+}
+
+#[pymethods]
+impl SimultaneousMoveState {
+    /// Create state for independent simultaneous mode.
+    #[staticmethod]
+    pub fn for_independent() -> Self {
+        SimultaneousMoveState {
+            phase: SimultaneousPhase::AwaitingMoves,
+            p0_move: None,
+            p1_move: None,
+            leader: None,
+        }
+    }
+
+    /// Create state for leader-follower mode with specified leader.
+    #[staticmethod]
+    pub fn for_leader_follower(leader: u8) -> Self {
+        SimultaneousMoveState {
+            phase: SimultaneousPhase::AwaitingMoves,
+            p0_move: None,
+            p1_move: None,
+            leader: Some(leader),
+        }
+    }
+
+    /// Submit a move for a player. Returns true if the phase advanced.
+    pub fn submit_move(&mut self, player: u8, pit: usize) -> bool {
+        if player == 0 {
+            self.p0_move = Some(pit);
+        } else {
+            self.p1_move = Some(pit);
+        }
+
+        match self.leader {
+            None => {
+                // independent mode: ready when both have submitted
+                if self.p0_move.is_some() && self.p1_move.is_some() {
+                    self.phase = SimultaneousPhase::ReadyToExecute;
+                    return true;
+                }
+            }
+            Some(leader) => {
+                // leader-follower mode
+                let leader_submitted = if leader == 0 {
+                    self.p0_move.is_some()
+                } else {
+                    self.p1_move.is_some()
+                };
+                let follower_submitted = if leader == 0 {
+                    self.p1_move.is_some()
+                } else {
+                    self.p0_move.is_some()
+                };
+
+                if leader_submitted && !follower_submitted {
+                    self.phase = SimultaneousPhase::AwaitingFollower;
+                    return true;
+                } else if leader_submitted && follower_submitted {
+                    self.phase = SimultaneousPhase::ReadyToExecute;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Get the leader's committed move (for follower to see in leader-follower mode).
+    pub fn get_leader_move(&self) -> Option<usize> {
+        self.leader.and_then(|l| if l == 0 { self.p0_move } else { self.p1_move })
+    }
+
+    /// Check if a player can submit a move in the current phase.
+    pub fn can_submit(&self, player: u8) -> bool {
+        match self.phase {
+            SimultaneousPhase::AwaitingMoves => {
+                // independent: either player can submit if they haven't
+                // leader-follower: only leader can submit
+                match self.leader {
+                    None => {
+                        if player == 0 {
+                            self.p0_move.is_none()
+                        } else {
+                            self.p1_move.is_none()
+                        }
+                    }
+                    Some(leader) => player == leader,
+                }
+            }
+            SimultaneousPhase::AwaitingFollower => {
+                // only follower can submit
+                match self.leader {
+                    Some(leader) => player != leader,
+                    None => false,
+                }
+            }
+            SimultaneousPhase::ReadyToExecute => false,
+        }
+    }
+
+    /// Reset to initial state for another simultaneous round.
+    pub fn reset(&mut self) {
+        self.phase = SimultaneousPhase::AwaitingMoves;
+        self.p0_move = None;
+        self.p1_move = None;
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SimultaneousMoveState(phase={:?}, p0_move={:?}, p1_move={:?}, leader={:?})",
+            self.phase, self.p0_move, self.p1_move, self.leader
+        )
+    }
+}

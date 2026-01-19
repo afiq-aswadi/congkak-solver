@@ -1,4 +1,36 @@
 from collections.abc import Sequence
+from enum import IntEnum
+
+class StartMode(IntEnum):
+    Sequential = 0
+    SimultaneousIndependent = 1
+    SimultaneousLeaderFollower = 2
+
+class LeaderSelection(IntEnum):
+    Random = 0
+    AlwaysP0 = 1
+    AlwaysP1 = 2
+
+class SimultaneousPhase(IntEnum):
+    AwaitingMoves = 0
+    AwaitingFollower = 1
+    ReadyToExecute = 2
+
+class SimultaneousMoveState:
+    phase: SimultaneousPhase
+    p0_move: int | None
+    p1_move: int | None
+    leader: int | None
+
+    @staticmethod
+    def for_independent() -> SimultaneousMoveState: ...
+    @staticmethod
+    def for_leader_follower(leader: int) -> SimultaneousMoveState: ...
+    def submit_move(self, player: int, pit: int) -> bool: ...
+    def get_leader_move(self) -> int | None: ...
+    def can_submit(self, player: int) -> bool: ...
+    def reset(self) -> None: ...
+    def __repr__(self) -> str: ...
 
 class BoardState:
     pits: tuple[int, ...]
@@ -22,7 +54,8 @@ class BoardState:
     def __repr__(self) -> str: ...
 
 class RuleConfig:
-    simultaneous_start: bool
+    start_mode: StartMode
+    leader_selection: LeaderSelection
     capture_enabled: bool
     capture_requires_loop: bool
     forfeit_enabled: bool
@@ -30,7 +63,8 @@ class RuleConfig:
 
     def __init__(
         self,
-        simultaneous_start: bool = False,
+        start_mode: StartMode = ...,
+        leader_selection: LeaderSelection = ...,
         capture_enabled: bool = True,
         forfeit_enabled: bool = True,
         burnt_holes_enabled: bool = False,
@@ -45,7 +79,17 @@ class MoveResult:
     extra_turn: bool
     captured: int
 
+class SimultaneousMoveResult:
+    state: BoardState
+    p0_extra_turn: bool
+    p1_extra_turn: bool
+    p0_captured: int
+    p1_captured: int
+
 def apply_move(state: BoardState, pit: int, rules: RuleConfig) -> MoveResult: ...
+def apply_simultaneous_moves(
+    state: BoardState, p0_pit: int, p1_pit: int, rules: RuleConfig
+) -> SimultaneousMoveResult: ...
 def get_legal_moves(state: BoardState) -> list[int]: ...
 def is_terminal(state: BoardState) -> bool: ...
 def get_winner(state: BoardState) -> int: ...

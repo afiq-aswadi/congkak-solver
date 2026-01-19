@@ -5,7 +5,9 @@ import tyro
 
 from congkak.congkak_core import (
     BoardState,
+    LeaderSelection,
     RuleConfig,
+    StartMode,
     apply_move,
     get_final_scores,
     get_legal_moves,
@@ -20,8 +22,11 @@ class Config:
     """Congkak game configuration."""
 
     # game rules
-    simultaneous_start: bool = False
-    """First move is simultaneous (both players pick at once)."""
+    start_mode: Literal["sequential", "independent", "leader_follower"] = "sequential"
+    """Start mode: sequential, independent (both pick blind), or leader_follower."""
+
+    leader_selection: Literal["random", "p0", "p1"] = "random"
+    """How leader is selected in leader_follower mode: random, p0 (always p0), p1 (always p1)."""
 
     capture: bool = True
     """Landing in own empty pit captures opposite."""
@@ -113,7 +118,7 @@ def run_terminal_game(config: Config, rules: RuleConfig) -> None:
 
     print("Congkak - Terminal Mode")
     print("=" * 40)
-    print(f"Rules: capture={config.capture}, forfeit={config.forfeit}")
+    print(f"Rules: start={config.start_mode}, capture={config.capture}, forfeit={config.forfeit}")
     print(f"Players: P0={config.p0} (d={config.p0_depth}), P1={config.p1} (d={config.p1_depth})")
     print()
 
@@ -163,13 +168,40 @@ def run_terminal_game(config: Config, rules: RuleConfig) -> None:
         print("Draw!")
 
 
+def _parse_start_mode(mode: str) -> StartMode:
+    """Convert string start mode to Rust enum."""
+    match mode:
+        case "sequential":
+            return StartMode.Sequential
+        case "independent":
+            return StartMode.SimultaneousIndependent
+        case "leader_follower":
+            return StartMode.SimultaneousLeaderFollower
+        case _:
+            raise ValueError(f"Unknown start mode: {mode}")
+
+
+def _parse_leader_selection(sel: str) -> LeaderSelection:
+    """Convert string leader selection to Rust enum."""
+    match sel:
+        case "random":
+            return LeaderSelection.Random
+        case "p0":
+            return LeaderSelection.AlwaysP0
+        case "p1":
+            return LeaderSelection.AlwaysP1
+        case _:
+            raise ValueError(f"Unknown leader selection: {sel}")
+
+
 def main(config: Config | None = None) -> None:
     """Main entry point."""
     if config is None:
         config = tyro.cli(Config)
 
     rules = RuleConfig(
-        simultaneous_start=config.simultaneous_start,
+        start_mode=_parse_start_mode(config.start_mode),
+        leader_selection=_parse_leader_selection(config.leader_selection),
         capture_enabled=config.capture,
         forfeit_enabled=config.forfeit,
         burnt_holes_enabled=config.burnt_holes,

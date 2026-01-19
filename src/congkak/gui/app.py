@@ -1,11 +1,17 @@
+import random
 from collections.abc import Generator
 
 import pygame
 
 from congkak.congkak_core import (
     BoardState,
+    LeaderSelection,
     RuleConfig,
+    SimultaneousMoveState,
+    SimultaneousPhase,
+    StartMode,
     apply_move,
+    apply_simultaneous_moves,
     get_final_scores,
     get_legal_moves,
     get_winner,
@@ -177,6 +183,59 @@ def draw_speed_indicator(screen: pygame.Surface, font: pygame.font.Font, delay_m
     screen.blit(text, (10, WINDOW_HEIGHT - 30))
 
 
+def draw_simultaneous_status(
+    screen: pygame.Surface,
+    font: pygame.font.Font,
+    sim_state: SimultaneousMoveState,
+    rules: RuleConfig,
+) -> None:
+    """Draw simultaneous mode status indicator."""
+    if rules.start_mode == StartMode.SimultaneousIndependent:
+        mode_text = "SIMULTANEOUS (Independent)"
+    else:
+        leader = sim_state.leader
+        leader_name = f"P{leader}" if leader is not None else "?"
+        mode_text = f"SIMULTANEOUS (Leader: {leader_name})"
+
+    phase_text = ""
+    if sim_state.phase == SimultaneousPhase.AwaitingMoves:
+        if rules.start_mode == StartMode.SimultaneousIndependent:
+            phase_text = "Both players: select your pit"
+            if sim_state.p0_move is not None:
+                phase_text = "P0 ready - waiting for P1"
+            elif sim_state.p1_move is not None:
+                phase_text = "P1 ready - waiting for P0"
+        else:
+            leader = sim_state.leader
+            phase_text = f"P{leader}: select your pit (leader)"
+    elif sim_state.phase == SimultaneousPhase.AwaitingFollower:
+        leader = sim_state.leader
+        follower = 1 - leader if leader is not None else 0
+        leader_move = sim_state.get_leader_move()
+        pit_start = 0 if leader == 0 else 7
+        pit_label = leader_move - pit_start + 1 if leader_move is not None else "?"
+        phase_text = f"P{follower}: respond (leader chose pit {pit_label})"
+    elif sim_state.phase == SimultaneousPhase.ReadyToExecute:
+        phase_text = "Executing simultaneous moves..."
+
+    big_font = pygame.font.Font(None, 32)
+    mode_surf = big_font.render(mode_text, True, HIGHLIGHT_COLOR)
+    screen.blit(mode_surf, (WINDOW_WIDTH // 2 - mode_surf.get_width() // 2, 10))
+
+    phase_surf = font.render(phase_text, True, TEXT_COLOR)
+    screen.blit(phase_surf, (WINDOW_WIDTH // 2 - phase_surf.get_width() // 2, 40))
+
+
+def determine_leader(selection: LeaderSelection) -> int:
+    """Determine the leader player based on selection rule."""
+    if selection == LeaderSelection.AlwaysP0:
+        return 0
+    elif selection == LeaderSelection.AlwaysP1:
+        return 1
+    else:
+        return random.randint(0, 1)
+
+
 def draw_game_over(screen: pygame.Surface, font: pygame.font.Font, state: BoardState) -> None:
     """Draw game over overlay."""
     overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -238,6 +297,15 @@ def run_gui(
     selected_pit: int | None = None
     game_over = False
     ai_thinking = False
+
+    # simultaneous mode state
+    is_first_move = True
+    sim_state: SimultaneousMoveState | None = None
+    if rules.start_mode == StartMode.SimultaneousIndependent:
+        sim_state = SimultaneousMoveState.for_independent()
+    elif rules.start_mode == StartMode.SimultaneousLeaderFollower:
+        leader = determine_leader(rules.leader_selection)
+        sim_state = SimultaneousMoveState.for_leader_follower(leader)
 
     # animation state
     animation: Generator[SowingStep, None, None] | None = None
@@ -459,6 +527,80 @@ def run_gui(
             pygame.display.flip()
             continue
 
+        # handle simultaneous mode for first move
+        if is_first_move and sim_state is not None and not game_over:
+            # get legal moves for both players
+            state_p0 = BoardState.from_pits(list(state.pits), 0)
+            state_p1 = BoardState.from_pits(list(state.pits), 1)
+            p0_legal = get_legal_moves(state_p0)
+            p1_legal = get_legal_moves(state_p1)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    break
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_q:
+                        running = False
+                    elif event.key == pygame.K_r:
+                        state = BoardState.initial()
+                        is_first_move = True
+                        if rules.start_mode == StartMode.SimultaneousIndependent:
+                            sim_state = SimultaneousMoveState.for_independent()
+                        elif rules.start_mode == StartMode.SimultaneousLeaderFollower:
+                            leader = determine_leader(rules.leader_selection)
+                            sim_state = SimultaneousMoveState.for_leader_follower(leader)
+                        for s in solvers:
+                            s.clear_tt()
+
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    pos = pygame.mouse.get_pos()
+                    # determine which player's pit was clicked
+                    pit_rects = draw_board(
+                        screen, font, state.pits, state.current_player, p0_legal + p1_legal, None
+                    )
+                    for pit_idx, rect in pit_rects.items():
+                        if rect.collidepoint(pos):
+                            # check if this player can submit
+                            is_p0_human = player_types[0] == "human"
+                            is_p1_human = player_types[1] == "human"
+                            if pit_idx in p0_legal and sim_state.can_submit(0) and is_p0_human:
+                                sim_state.submit_move(0, pit_idx)
+                            elif pit_idx in p1_legal and sim_state.can_submit(1) and is_p1_human:
+                                sim_state.submit_move(1, pit_idx)
+                            break
+
+            # handle AI moves in simultaneous mode
+            for player in [0, 1]:
+                if player_types[player] == "ai" and sim_state.can_submit(player):
+                    player_state = BoardState.from_pits(list(state.pits), player)
+                    move = solvers[player].get_best_move(player_state)
+                    if move is not None:
+                        sim_state.submit_move(player, move)
+
+            # check if both moves are ready
+            if sim_state.phase == SimultaneousPhase.ReadyToExecute:
+                p0_move = sim_state.p0_move
+                p1_move = sim_state.p1_move
+                assert p0_move is not None and p1_move is not None
+
+                # apply simultaneous moves
+                result = apply_simultaneous_moves(state, p0_move, p1_move, rules)
+                state = result.state
+                is_first_move = False
+                sim_state = None
+
+                if is_terminal(state):
+                    game_over = True
+                # fall through to normal game loop after simultaneous execution
+            else:
+                # draw simultaneous mode status
+                draw_board(screen, font, state.pits, 0, p0_legal + p1_legal, None)
+                draw_simultaneous_status(screen, font, sim_state, rules)
+                draw_speed_indicator(screen, font, current_delay)
+                pygame.display.flip()
+                continue
+
         legal_moves = get_legal_moves(state) if not game_over else []
 
         for event in pygame.event.get():
@@ -478,6 +620,15 @@ def run_gui(
                     anim_history_idx = 0
                     turn_history = []
                     pre_anim_state = None
+                    # reset simultaneous state
+                    is_first_move = True
+                    if rules.start_mode == StartMode.SimultaneousIndependent:
+                        sim_state = SimultaneousMoveState.for_independent()
+                    elif rules.start_mode == StartMode.SimultaneousLeaderFollower:
+                        leader = determine_leader(rules.leader_selection)
+                        sim_state = SimultaneousMoveState.for_leader_follower(leader)
+                    else:
+                        sim_state = None
                     for s in solvers:
                         s.clear_tt()
                 elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_UP):
