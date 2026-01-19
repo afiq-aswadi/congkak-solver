@@ -484,6 +484,9 @@ def run_gui(
                                 paused = False
                                 step_delay = 0
                             else:
+                                # instant mode: generate animation for history, then apply
+                                steps = list(animate_sowing(state, pit_idx, rules))
+                                turn_history.append((state, pit_idx, state.current_player, steps))
                                 result = apply_move(state, pit_idx, rules)
                                 state = result.state
                                 if is_terminal(state):
@@ -510,6 +513,9 @@ def run_gui(
                     pending_move_delay = current_delay * 3
                     anim_player = state.current_player
                 else:
+                    # instant mode: generate animation for history, then apply
+                    steps = list(animate_sowing(state, move, rules))
+                    turn_history.append((state, move, state.current_player, steps))
                     result = apply_move(state, move, rules)
                     state = result.state
                     if is_terminal(state):
