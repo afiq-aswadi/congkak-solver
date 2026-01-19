@@ -42,8 +42,11 @@ class Config:
     p1: Literal["human", "ai", "random"] = "ai"
     """Player 1 type."""
 
-    ai_depth: int = 8
-    """Search depth for AI players."""
+    p0_depth: int = 8
+    """Search depth for P0 AI."""
+
+    p1_depth: int = 8
+    """Search depth for P1 AI."""
 
     # display
     gui: bool = True
@@ -102,13 +105,16 @@ def get_random_move(legal_moves: list[int]) -> int:
 def run_terminal_game(config: Config, rules: RuleConfig) -> None:
     """Run the game in terminal mode."""
     state = BoardState.initial()
-    solver = MinimaxSolver(rules, max_depth=config.ai_depth)
+    solvers = [
+        MinimaxSolver(rules, max_depth=config.p0_depth),
+        MinimaxSolver(rules, max_depth=config.p1_depth),
+    ]
     player_types = [config.p0, config.p1]
 
     print("Congkak - Terminal Mode")
     print("=" * 40)
     print(f"Rules: capture={config.capture}, forfeit={config.forfeit}")
-    print(f"Players: P0={config.p0}, P1={config.p1}")
+    print(f"Players: P0={config.p0} (d={config.p0_depth}), P1={config.p1} (d={config.p1_depth})")
     print()
 
     while not is_terminal(state):
@@ -123,7 +129,7 @@ def run_terminal_game(config: Config, rules: RuleConfig) -> None:
             move = get_human_move(state, legal_moves)
         elif player_type == "ai":
             print("AI thinking...")
-            move = solver.get_best_move(state)
+            move = solvers[current_player].get_best_move(state)
             assert move is not None
             pit_start, _ = BoardState.player_pit_range(current_player)
             print(f"AI plays pit {move - pit_start + 1}")
@@ -176,7 +182,8 @@ def main(config: Config | None = None) -> None:
         run_gui(
             p0_type=config.p0,
             p1_type=config.p1,
-            ai_depth=config.ai_depth,
+            p0_depth=config.p0_depth,
+            p1_depth=config.p1_depth,
             rules=rules,
             animation_delay=config.animation_delay,
         )

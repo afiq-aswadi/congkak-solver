@@ -213,7 +213,8 @@ def draw_game_over(screen: pygame.Surface, font: pygame.font.Font, state: BoardS
 def run_gui(
     p0_type: str = "human",
     p1_type: str = "ai",
-    ai_depth: int = 8,
+    p0_depth: int = 8,
+    p1_depth: int = 8,
     rules: RuleConfig | None = None,
     animation_delay: int = 0,
 ) -> None:
@@ -227,7 +228,10 @@ def run_gui(
     if rules is None:
         rules = RuleConfig.default_rules()
 
-    solver = MinimaxSolver(rules, max_depth=ai_depth)
+    solvers = [
+        MinimaxSolver(rules, max_depth=p0_depth),
+        MinimaxSolver(rules, max_depth=p1_depth),
+    ]
     player_types = [p0_type, p1_type]
 
     state = BoardState.initial()
@@ -474,7 +478,8 @@ def run_gui(
                     anim_history_idx = 0
                     turn_history = []
                     pre_anim_state = None
-                    solver.clear_tt()
+                    for s in solvers:
+                        s.clear_tt()
                 elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_UP):
                     current_delay = max(0, current_delay - 50)
                 elif event.key in (pygame.K_MINUS, pygame.K_DOWN):
@@ -538,7 +543,7 @@ def run_gui(
             draw_board(screen, font, state.pits, state.current_player, legal_moves, selected_pit)
             pygame.display.flip()
 
-            move = solver.get_best_move(state)
+            move = solvers[state.current_player].get_best_move(state)
             if move is not None:
                 if current_delay > 0:
                     # show selected pit first, then start animation
