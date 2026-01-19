@@ -44,6 +44,7 @@ def draw_board(
     selected_pit: int | None,
     active_pit: int | None = None,
     seeds_in_hand: int = 0,
+    action: str | None = None,
 ) -> dict[int, pygame.Rect]:
     """Draw the congkak board and return pit rects for click detection."""
     screen.fill(BG_COLOR)
@@ -147,6 +148,21 @@ def draw_board(
         hand_text = font.render(f"Seeds in hand: {seeds_in_hand}", True, ACTIVE_COLOR)
         screen.blit(hand_text, (WINDOW_WIDTH // 2 - hand_text.get_width() // 2, WINDOW_HEIGHT - 30))
 
+    # draw action indicator for significant events
+    action_labels = {
+        "relay": "Relay!",
+        "extra_turn": "Extra turn!",
+        "capture": "Capture!",
+        "forfeit": "Forfeit!",
+    }
+    if action in action_labels:
+        big_font = pygame.font.Font(None, 48)
+        action_text = big_font.render(action_labels[action], True, HIGHLIGHT_COLOR)
+        screen.blit(
+            action_text,
+            (WINDOW_WIDTH // 2 - action_text.get_width() // 2, WINDOW_HEIGHT // 2 - 24),
+        )
+
     return pit_rects
 
 
@@ -232,7 +248,11 @@ def run_gui(
             if step_delay <= 0:
                 try:
                     anim_step = next(animation)
-                    step_delay = current_delay
+                    # add extra delay for significant events
+                    if anim_step.action in ("relay", "extra_turn", "capture", "forfeit"):
+                        step_delay = current_delay * 3
+                    else:
+                        step_delay = current_delay
                 except StopIteration:
                     animation = None
                     anim_step = None
@@ -266,6 +286,7 @@ def run_gui(
                     None,
                     active_pit=anim_step.current_pos,
                     seeds_in_hand=anim_step.seeds_in_hand,
+                    action=anim_step.action,
                 )
                 draw_speed_indicator(screen, font, current_delay)
             pygame.display.flip()
