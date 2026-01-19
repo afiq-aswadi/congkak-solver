@@ -1,0 +1,3 @@
+[workspace]
+members = ["congkak-core"]
+resolver = "2"

@@ -1,0 +1,39 @@
+[project]
+name = "congkak"
+version = "0.1.0"
+description = "Congkak (Malaysian mancala) game with search-based solver"
+requires-python = ">=3.11"
+dependencies = [
+    "pygame>=2.5",
+    "tyro>=0.7",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+congkak = "congkak.cli:main"
+
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "src"
+module-name = "congkak.congkak_core"
+manifest-path = "congkak-core/Cargo.toml"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ty.rules]
+unresolved-import = "error"
