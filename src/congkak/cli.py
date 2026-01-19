@@ -46,6 +46,9 @@ class Config:
     gui: bool = True
     """Use pygame GUI instead of terminal."""
 
+    animation_delay: int = 0
+    """Delay in milliseconds after each move (0 = instant)."""
+
 
 def print_board(state: BoardState) -> None:
     """Print the board to terminal."""
@@ -171,6 +174,7 @@ def main(config: Config | None = None) -> None:
             p1_type=config.p1,
             ai_depth=config.ai_depth,
             rules=rules,
+            animation_delay=config.animation_delay,
         )
     else:
         run_terminal_game(config, rules)
