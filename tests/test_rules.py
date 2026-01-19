@@ -1,0 +1,127 @@
+from congkak import BoardState, RuleConfig, apply_move, get_legal_moves, is_terminal
+
+
+def test_default_rules() -> None:
+    rules = RuleConfig.default_rules()
+    assert rules.capture_enabled
+    assert rules.forfeit_enabled
+    assert not rules.simultaneous_start
+    assert not rules.burnt_holes_enabled
+
+
+def test_legal_moves_initial() -> None:
+    state = BoardState.initial()
+    moves = get_legal_moves(state)
+    assert moves == [0, 1, 2, 3, 4, 5, 6]
+
+
+def test_legal_moves_player1() -> None:
+    state = BoardState.from_pits([0] * 16, 1)
+    # set some seeds for player 1
+    pits = list(state.pits)
+    pits[7] = 5
+    pits[10] = 3
+    state = BoardState.from_pits(pits, 1)
+    moves = get_legal_moves(state)
+    assert moves == [7, 10]
+
+
+def test_extra_turn_on_store() -> None:
+    # pit 6 with 1 seed -> lands in store (14)
+    pits = [0] * 16
+    pits[6] = 1
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig.default_rules()
+
+    result = apply_move(state, 6, rules)
+    assert result.extra_turn
+    assert result.state.current_player == 0
+    assert result.state.pits[14] == 1
+
+
+def test_relay_sowing() -> None:
+    # landing in a pit with seeds -> relay continues
+    pits = [0] * 16
+    pits[0] = 2  # 2 seeds in pit 0
+    pits[2] = 3  # 3 seeds in pit 2 (will be hit by relay)
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig.default_rules()
+
+    result = apply_move(state, 0, rules)
+    # pit 0 -> drop in 1, drop in 2 (now has 4 seeds) -> relay picks up
+    # -> drop in 3, 4, 5, 6 -> end
+    assert result.state.pits[0] == 0
+    assert result.state.pits[1] == 1
+    assert result.state.pits[2] == 0  # picked up for relay
+
+
+def test_capture() -> None:
+    # landing in own empty pit captures opposite
+    pits = [0] * 16
+    pits[0] = 3  # 3 seeds: lands on pit 3 (own, empty)
+    pits[10] = 5  # opposite of pit 3 (13-3=10) has 5 seeds
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig.default_rules()
+
+    result = apply_move(state, 0, rules)
+    # lands on pit 3 (empty), captures opposite (pit 10) + itself
+    assert result.captured == 6  # 5 from opposite + 1 (the landing seed)
+    assert result.state.pits[14] == 6  # captured seeds go to store
+    assert result.state.pits[3] == 0
+    assert result.state.pits[10] == 0
+
+
+def test_capture_disabled() -> None:
+    pits = [0] * 16
+    pits[0] = 3
+    pits[10] = 5
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig(capture_enabled=False)
+
+    result = apply_move(state, 0, rules)
+    assert result.captured == 0
+    assert result.state.pits[3] == 1  # seed stays
+    assert result.state.pits[10] == 5  # opposite untouched
+
+
+def test_forfeit() -> None:
+    # landing in opponent empty pit forfeits seed
+    pits = [0] * 16
+    pits[5] = 3  # 3 seeds: 5->6->14->7 (opponent's empty pit)
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig.default_rules()
+
+    result = apply_move(state, 5, rules)
+    # lands on pit 7 (opponent, empty) -> forfeit to opponent store
+    assert result.state.pits[7] == 0  # seed forfeited
+    assert result.state.pits[15] == 1  # opponent store gets it
+
+
+def test_forfeit_disabled() -> None:
+    pits = [0] * 16
+    pits[5] = 3
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig(forfeit_enabled=False)
+
+    result = apply_move(state, 5, rules)
+    assert result.state.pits[7] == 1  # seed stays
+    assert result.state.pits[15] == 0  # opponent store empty
+
+
+def test_terminal_p0_empty() -> None:
+    pits = [0] * 16
+    pits[7] = 10  # only P1 has seeds
+    state = BoardState.from_pits(pits, 0)
+    assert is_terminal(state)
+
+
+def test_terminal_p1_empty() -> None:
+    pits = [0] * 16
+    pits[3] = 10  # only P0 has seeds
+    state = BoardState.from_pits(pits, 1)
+    assert is_terminal(state)
+
+
+def test_not_terminal() -> None:
+    state = BoardState.initial()
+    assert not is_terminal(state)
