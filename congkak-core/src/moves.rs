@@ -81,6 +81,7 @@ pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveRes
     let mut current_pos = pit;
     let mut extra_turn = false;
     let mut captured = 0u8;
+    let mut has_looped = false; // track if we've passed through our store
 
     // relay sowing loop
     while seeds > 0 {
@@ -90,6 +91,11 @@ pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveRes
         // skip opponent's store
         if current_pos == opp_store {
             continue;
+        }
+
+        // track if we pass through our store (for capture_requires_loop rule)
+        if current_pos == my_store {
+            has_looped = true;
         }
 
         // drop one seed
@@ -117,7 +123,9 @@ pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveRes
                 }
 
                 // landed_count == 1, this was an empty pit before we dropped
-                if is_my_pit && rules.capture_enabled {
+                let can_capture = rules.capture_enabled
+                    && (!rules.capture_requires_loop || has_looped);
+                if is_my_pit && can_capture {
                     // capture: take seeds from opposite pit + this seed
                     let opp_pit = opposite_pit(current_pos);
                     let opp_seeds = pits[opp_pit];

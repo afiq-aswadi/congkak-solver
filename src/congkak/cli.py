@@ -26,6 +26,9 @@ class Config:
     capture: bool = True
     """Landing in own empty pit captures opposite."""
 
+    capture_requires_loop: bool = False
+    """Capture only allowed after passing through own store."""
+
     forfeit: bool = True
     """Landing in opponent empty pit forfeits seed."""
 
@@ -164,6 +167,7 @@ def main(config: Config | None = None) -> None:
         capture_enabled=config.capture,
         forfeit_enabled=config.forfeit,
         burnt_holes_enabled=config.burnt_holes,
+        capture_requires_loop=config.capture_requires_loop,
     )
 
     if config.gui:

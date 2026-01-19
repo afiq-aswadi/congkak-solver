@@ -18,23 +18,29 @@ pub struct RuleConfig {
     /// Multi-round play with burnt holes (not implemented yet)
     #[pyo3(get, set)]
     pub burnt_holes_enabled: bool,
+
+    /// Capture only allowed after passing through own store at least once
+    #[pyo3(get, set)]
+    pub capture_requires_loop: bool,
 }
 
 #[pymethods]
 impl RuleConfig {
     #[new]
-    #[pyo3(signature = (simultaneous_start=false, capture_enabled=true, forfeit_enabled=true, burnt_holes_enabled=false))]
+    #[pyo3(signature = (simultaneous_start=false, capture_enabled=true, forfeit_enabled=true, burnt_holes_enabled=false, capture_requires_loop=false))]
     pub fn new(
         simultaneous_start: bool,
         capture_enabled: bool,
         forfeit_enabled: bool,
         burnt_holes_enabled: bool,
+        capture_requires_loop: bool,
     ) -> Self {
         RuleConfig {
             simultaneous_start,
             capture_enabled,
             forfeit_enabled,
             burnt_holes_enabled,
+            capture_requires_loop,
         }
     }
 
@@ -45,16 +51,18 @@ impl RuleConfig {
             capture_enabled: true,
             forfeit_enabled: true,
             burnt_holes_enabled: false,
+            capture_requires_loop: false,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "RuleConfig(simultaneous_start={}, capture={}, forfeit={}, burnt_holes={})",
+            "RuleConfig(simultaneous_start={}, capture={}, forfeit={}, burnt_holes={}, capture_requires_loop={})",
             self.simultaneous_start,
             self.capture_enabled,
             self.forfeit_enabled,
-            self.burnt_holes_enabled
+            self.burnt_holes_enabled,
+            self.capture_requires_loop
         )
     }
 }

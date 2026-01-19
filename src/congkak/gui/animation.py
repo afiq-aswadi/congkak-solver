@@ -73,6 +73,7 @@ def animate_sowing(
     yield SowingStep(pits.copy(), seeds, None, "pickup")
 
     current_pos = pit
+    has_looped = False  # track if we've passed through our store
 
     while seeds > 0:
         current_pos = next_position(current_pos)
@@ -80,6 +81,10 @@ def animate_sowing(
         # skip opponent's store
         if current_pos == opp_store:
             continue
+
+        # track if we pass through our store
+        if current_pos == my_store:
+            has_looped = True
 
         # drop one seed
         pits[current_pos] += 1
@@ -106,7 +111,10 @@ def animate_sowing(
                     continue
 
                 # landed_count == 1, this was an empty pit before we dropped
-                if is_my_pit and rules.capture_enabled:
+                can_capture = rules.capture_enabled and (
+                    not rules.capture_requires_loop or has_looped
+                )
+                if is_my_pit and can_capture:
                     opp_pit = opposite_pit(current_pos)
                     opp_seeds = pits[opp_pit]
                     if opp_seeds > 0:

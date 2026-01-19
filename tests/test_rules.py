@@ -130,3 +130,30 @@ def test_terminal_p1_empty() -> None:
 def test_not_terminal() -> None:
     state = BoardState.initial()
     assert not is_terminal(state)
+
+
+def test_capture_requires_loop_blocks_early_capture() -> None:
+    # pit 6 with 3 seeds: 6 -> 5 -> 4 -> 3 (lands on pit 3, own empty pit)
+    # without looping through store, capture should NOT happen
+    pits = [0] * 16
+    pits[6] = 3
+    pits[10] = 5  # opposite of pit 3
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig(capture_requires_loop=True)
+
+    result = apply_move(state, 6, rules)
+    # no capture because we didn't pass through store
+    assert result.captured == 0
+    assert result.state.pits[3] == 1  # seed stays
+    assert result.state.pits[10] == 5  # opposite untouched
+
+
+def test_capture_requires_loop_allows_after_loop() -> None:
+    # verify capture still works when capture_requires_loop=False
+    rules_no_loop = RuleConfig(capture_requires_loop=False)
+    pits = [0] * 16
+    pits[6] = 3
+    pits[10] = 5
+    state = BoardState.from_pits(pits, 0)
+    result = apply_move(state, 6, rules_no_loop)
+    assert result.captured == 6  # capture works without loop requirement
