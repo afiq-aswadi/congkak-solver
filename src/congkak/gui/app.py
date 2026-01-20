@@ -429,6 +429,7 @@ def run_gui(
     p1_depth: int = 8,
     rules: RuleConfig | None = None,
     animation_delay: int = 0,
+    initial_state: BoardState | None = None,
 ) -> None:
     """Run the pygame GUI."""
     pygame.init()
@@ -446,7 +447,8 @@ def run_gui(
     ]
     player_types = [p0_type, p1_type]
 
-    state = BoardState.initial()
+    reset_state = initial_state if initial_state is not None else BoardState.initial()
+    state = reset_state
     selected_pit: int | None = None
     game_over = False
     ai_thinking = False
@@ -854,7 +856,7 @@ def run_gui(
                     if event.key == pygame.K_q:
                         running = False
                     elif event.key == pygame.K_r:
-                        state = BoardState.initial()
+                        state = reset_state
                         is_first_move = True
                         sim_animation = None
                         sim_anim_step = None
@@ -945,7 +947,7 @@ def run_gui(
                 if event.key == pygame.K_q:
                     running = False
                 elif event.key == pygame.K_r:
-                    state = BoardState.initial()
+                    state = reset_state
                     game_over = False
                     ai_thinking = False
                     animation = None

@@ -60,6 +60,22 @@ class Config:
     animation_delay: int = 0
     """Delay in milliseconds after each move (0 = instant)."""
 
+    # initial state
+    p0_pits: str | None = None
+    """P0's initial pit values as 7 comma-separated integers. Example: '7,7,7,7,7,7,7'"""
+
+    p1_pits: str | None = None
+    """P1's initial pit values as 7 comma-separated integers. Example: '7,7,7,7,7,7,7'"""
+
+    p0_store: int = 0
+    """P0's initial store value."""
+
+    p1_store: int = 0
+    """P1's initial store value."""
+
+    starting_player: int = 0
+    """Which player starts (0 or 1)."""
+
 
 def print_board(state: BoardState) -> None:
     """Print the board to terminal."""
@@ -107,9 +123,28 @@ def get_random_move(legal_moves: list[int]) -> int:
     return random.choice(legal_moves)
 
 
+def parse_initial_state(config: Config) -> BoardState:
+    """Parse initial state from config, returning initial or custom state."""
+    if config.p0_pits is None and config.p1_pits is None:
+        return BoardState.initial()
+
+    # default to standard if only one side specified
+    p0_pits = [int(x.strip()) for x in config.p0_pits.split(",")] if config.p0_pits else [7] * 7
+    p1_pits = [int(x.strip()) for x in config.p1_pits.split(",")] if config.p1_pits else [7] * 7
+
+    assert len(p0_pits) == 7, f"Expected 7 P0 pit values, got {len(p0_pits)}"
+    assert len(p1_pits) == 7, f"Expected 7 P1 pit values, got {len(p1_pits)}"
+    assert all(p >= 0 for p in p0_pits + p1_pits), "Pit values must be non-negative"
+    assert config.p0_store >= 0 and config.p1_store >= 0, "Store values must be non-negative"
+    assert config.starting_player in (0, 1), "starting_player must be 0 or 1"
+
+    pits = p0_pits + p1_pits + [config.p0_store, config.p1_store]
+    return BoardState.from_pits(pits, config.starting_player)
+
+
 def run_terminal_game(config: Config, rules: RuleConfig) -> None:
     """Run the game in terminal mode."""
-    state = BoardState.initial()
+    state = parse_initial_state(config)
     solvers = [
         MinimaxSolver(rules, max_depth=config.p0_depth),
         MinimaxSolver(rules, max_depth=config.p1_depth),
@@ -218,6 +253,7 @@ def main(config: Config | None = None) -> None:
             p1_depth=config.p1_depth,
             rules=rules,
             animation_delay=config.animation_delay,
+            initial_state=parse_initial_state(config),
         )
     else:
         run_terminal_game(config, rules)
