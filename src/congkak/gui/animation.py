@@ -58,6 +58,19 @@ class SowingStep:
     action: str  # "pickup", "drop", "relay", "capture", "forfeit", "extra_turn", "done"
 
 
+@dataclass
+class SimultaneousSowingStep:
+    """A single step in simultaneous sowing animation."""
+
+    pits: list[int]  # combined board state
+    p0_seeds_in_hand: int
+    p1_seeds_in_hand: int
+    p0_current_pos: int | None  # None if picking up or done
+    p1_current_pos: int | None
+    p0_action: str  # pickup/drop/relay/capture/forfeit/extra_turn/done/waiting
+    p1_action: str
+
+
 def animate_sowing(
     state: BoardState, pit: int, rules: RuleConfig
 ) -> Generator[SowingStep, None, None]:
@@ -129,3 +142,202 @@ def animate_sowing(
                     yield SowingStep(pits.copy(), 0, current_pos, "forfeit")
 
     yield SowingStep(pits.copy(), 0, None, "done")
+
+
+class _PlayerSowingState:
+    """Internal class to track one player's sowing progress."""
+
+    def __init__(
+        self, player: int, start_pit: int, initial_pits: list[int], rules: RuleConfig
+    ) -> None:
+        self.player = player
+        self.current_pos = start_pit
+        self.seeds = initial_pits[start_pit]
+        self.delta = [0] * 16  # changes this player makes to the board
+        self.delta[start_pit] = -initial_pits[start_pit]  # pick up seeds
+        self.rules = rules
+        self.my_store = player_store(player)
+        self.opp_store = opponent_store(player)
+        self.done = False
+        self.extra_turn = False
+        self.has_looped = False
+        self.last_action = "pickup"
+        self.last_pos: int | None = None
+
+    def step(self) -> str:
+        """Advance by one drop. Returns the action taken."""
+        if self.done:
+            return "waiting"
+
+        if self.seeds == 0:
+            self.done = True
+            return "done"
+
+        # move to next position
+        self.current_pos = next_position(self.current_pos)
+
+        # skip opponent's store
+        while self.current_pos == self.opp_store:
+            self.current_pos = next_position(self.current_pos)
+
+        # track if we pass through our store
+        if self.current_pos == self.my_store:
+            self.has_looped = True
+
+        # drop one seed
+        self.delta[self.current_pos] += 1
+        self.seeds -= 1
+        self.last_pos = self.current_pos
+        action = "drop"
+
+        # check what happens when we drop the last seed
+        if self.seeds == 0:
+            # landed in own store -> extra turn
+            if self.current_pos == self.my_store:
+                self.extra_turn = True
+                self.done = True
+                return "extra_turn"
+
+            # landed in a pit (not a store)
+            if self.current_pos < 14:
+                # need to check the actual pit count (base + our delta only for relay check)
+                # for relay: we only relay if there were seeds there before we dropped
+                # this is tracked via delta - if delta > 1, there were seeds before
+                return action
+
+        self.last_action = action
+        return action
+
+    def check_end_conditions(self, base_pits: list[int], other_delta: list[int]) -> str:
+        """Check end-of-sowing conditions after both players have stepped.
+
+        Must be called only when seeds == 0 and not yet done.
+        Returns the final action: relay, capture, forfeit, or done.
+        """
+        if self.done or self.seeds > 0:
+            return "waiting" if self.done else "drop"
+
+        pos = self.current_pos
+        if pos >= 14:  # in a store, already handled
+            self.done = True
+            return "done"
+
+        # calculate actual pit count: base + our delta + other's delta
+        actual_count = base_pits[pos] + self.delta[pos] + other_delta[pos]
+
+        # relay: if pit now has more than 1 seed
+        if actual_count > 1:
+            self.seeds = actual_count
+            # reset delta for this pit (we're picking up everything)
+            self.delta[pos] = -base_pits[pos] - other_delta[pos]
+            return "relay"
+
+        # landed on empty pit (count == 1, it was empty before)
+        is_my_pit = is_player_pit(pos, self.player)
+        can_capture = self.rules.capture_enabled and (
+            not self.rules.capture_requires_loop or self.has_looped
+        )
+
+        if is_my_pit and can_capture:
+            opp_pit = opposite_pit(pos)
+            opp_actual = base_pits[opp_pit] + self.delta[opp_pit] + other_delta[opp_pit]
+            if opp_actual > 0:
+                # capture: take opponent's seeds + our seed
+                captured = opp_actual + 1
+                self.delta[self.my_store] += captured
+                self.delta[pos] = -base_pits[pos] - other_delta[pos]
+                self.delta[opp_pit] = -base_pits[opp_pit] - other_delta[opp_pit]
+                self.done = True
+                return "capture"
+        elif not is_my_pit and self.rules.forfeit_enabled:
+            # forfeit: seed goes to opponent's store
+            self.delta[self.opp_store] += 1
+            self.delta[pos] = -base_pits[pos] - other_delta[pos]
+            self.done = True
+            return "forfeit"
+
+        self.done = True
+        return "done"
+
+
+def animate_simultaneous_sowing(
+    state: BoardState, p0_pit: int, p1_pit: int, rules: RuleConfig
+) -> Generator[SimultaneousSowingStep, None, tuple[bool, bool]]:
+    """Generate animation steps for simultaneous sowing.
+
+    Returns (p0_extra_turn, p1_extra_turn) when complete.
+    """
+    base_pits = list(state.pits)
+    p0_state = _PlayerSowingState(0, p0_pit, base_pits, rules)
+    p1_state = _PlayerSowingState(1, p1_pit, base_pits, rules)
+
+    def combined_pits() -> list[int]:
+        return [base_pits[i] + p0_state.delta[i] + p1_state.delta[i] for i in range(16)]
+
+    # yield initial pickup state
+    yield SimultaneousSowingStep(
+        pits=combined_pits(),
+        p0_seeds_in_hand=p0_state.seeds,
+        p1_seeds_in_hand=p1_state.seeds,
+        p0_current_pos=None,
+        p1_current_pos=None,
+        p0_action="pickup",
+        p1_action="pickup",
+    )
+
+    # sowing loop - advance both players in lock-step
+    while not (p0_state.done and p1_state.done):
+        # each player takes one step
+        p0_action = p0_state.step()
+        p1_action = p1_state.step()
+
+        # yield intermediate state after dropping
+        yield SimultaneousSowingStep(
+            pits=combined_pits(),
+            p0_seeds_in_hand=p0_state.seeds,
+            p1_seeds_in_hand=p1_state.seeds,
+            p0_current_pos=p0_state.last_pos,
+            p1_current_pos=p1_state.last_pos,
+            p0_action=p0_action,
+            p1_action=p1_action,
+        )
+
+        # check end conditions for players who just ran out of seeds
+        if p0_state.seeds == 0 and not p0_state.done:
+            p0_end_action = p0_state.check_end_conditions(base_pits, p1_state.delta)
+            if p0_end_action in ("relay", "capture", "forfeit"):
+                yield SimultaneousSowingStep(
+                    pits=combined_pits(),
+                    p0_seeds_in_hand=p0_state.seeds,
+                    p1_seeds_in_hand=p1_state.seeds,
+                    p0_current_pos=p0_state.last_pos,
+                    p1_current_pos=p1_state.last_pos,
+                    p0_action=p0_end_action,
+                    p1_action="waiting" if p1_state.done else p1_action,
+                )
+
+        if p1_state.seeds == 0 and not p1_state.done:
+            p1_end_action = p1_state.check_end_conditions(base_pits, p0_state.delta)
+            if p1_end_action in ("relay", "capture", "forfeit"):
+                yield SimultaneousSowingStep(
+                    pits=combined_pits(),
+                    p0_seeds_in_hand=p0_state.seeds,
+                    p1_seeds_in_hand=p1_state.seeds,
+                    p0_current_pos=p0_state.last_pos,
+                    p1_current_pos=p1_state.last_pos,
+                    p0_action="waiting" if p0_state.done else p0_action,
+                    p1_action=p1_end_action,
+                )
+
+    # final done state
+    yield SimultaneousSowingStep(
+        pits=combined_pits(),
+        p0_seeds_in_hand=0,
+        p1_seeds_in_hand=0,
+        p0_current_pos=None,
+        p1_current_pos=None,
+        p0_action="done",
+        p1_action="done",
+    )
+
+    return (p0_state.extra_turn, p1_state.extra_turn)
