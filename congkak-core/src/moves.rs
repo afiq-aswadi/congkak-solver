@@ -65,10 +65,11 @@ fn next_position(pos: usize) -> usize {
     }
 }
 
-/// Apply a move and return the resulting state
-/// This implements relay sowing with all rule variants
-#[pyfunction]
-pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveResult {
+fn apply_move_internal(
+    state: &BoardState,
+    pit: usize,
+    rules: &RuleConfig,
+) -> (MoveResult, u32) {
     let mut pits = state.pits;
     let player = state.current_player;
     let my_store = player_store(player);
@@ -86,6 +87,7 @@ pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveRes
     let mut extra_turn = false;
     let mut captured = 0u8;
     let mut has_looped = false; // track if we've passed through our store
+    let mut steps = 0u32;
 
     // relay sowing loop
     while seeds > 0 {
@@ -105,6 +107,7 @@ pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveRes
         // drop one seed
         pits[current_pos] += 1;
         seeds -= 1;
+        steps += 1;
 
         // check what happens when we drop the last seed
         if seeds == 0 {
@@ -155,14 +158,24 @@ pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveRes
         1 - player
     };
 
-    MoveResult {
+    let result = MoveResult {
         state: BoardState {
             pits,
             current_player: next_player,
         },
         extra_turn,
         captured,
-    }
+    };
+
+    (result, steps)
+}
+
+/// Apply a move and return the resulting state
+/// This implements relay sowing with all rule variants
+#[pyfunction]
+pub fn apply_move(state: &BoardState, pit: usize, rules: &RuleConfig) -> MoveResult {
+    let (result, _) = apply_move_internal(state, pit, rules);
+    result
 }
 
 /// Get all legal moves for the current player
@@ -219,6 +232,118 @@ pub fn get_final_scores(state: &BoardState) -> (u8, u8) {
     )
 }
 
+struct SimPlayerState {
+    player: u8,
+    current_pos: usize,
+    seeds: u8,
+    delta: [i16; 16],
+    done: bool,
+    extra_turn: bool,
+    has_looped: bool,
+    steps: u32,
+    captured: u8,
+    my_store: usize,
+    opp_store: usize,
+}
+
+impl SimPlayerState {
+    fn new(player: u8, start_pit: usize, base_pits: &[u8; 16]) -> Self {
+        let seeds = base_pits[start_pit];
+        assert!(seeds > 0, "start pit is empty: {start_pit}");
+        let mut delta = [0i16; 16];
+        delta[start_pit] = -(seeds as i16);
+        Self {
+            player,
+            current_pos: start_pit,
+            seeds,
+            delta,
+            done: false,
+            extra_turn: false,
+            has_looped: false,
+            steps: 0,
+            captured: 0,
+            my_store: player_store(player),
+            opp_store: opponent_store(player),
+        }
+    }
+
+    fn step(&mut self) {
+        if self.done || self.seeds == 0 {
+            return;
+        }
+
+        self.current_pos = next_position(self.current_pos);
+        while self.current_pos == self.opp_store {
+            self.current_pos = next_position(self.current_pos);
+        }
+
+        if self.current_pos == self.my_store {
+            self.has_looped = true;
+        }
+
+        self.delta[self.current_pos] += 1;
+        self.seeds -= 1;
+        self.steps += 1;
+
+        if self.seeds == 0 && self.current_pos == self.my_store {
+            self.extra_turn = true;
+            self.done = true;
+        }
+    }
+
+    fn check_end_conditions(
+        &mut self,
+        base_pits: &[u8; 16],
+        other_delta: &[i16; 16],
+        rules: &RuleConfig,
+    ) {
+        if self.done || self.seeds > 0 {
+            return;
+        }
+
+        let pos = self.current_pos;
+        if pos >= 14 {
+            self.done = true;
+            return;
+        }
+
+        let actual_count = base_pits[pos] as i16 + self.delta[pos] + other_delta[pos];
+        assert!(actual_count >= 0, "pit underflow at index {pos}");
+
+        if actual_count > 1 {
+            self.seeds = actual_count as u8;
+            self.delta[pos] = -(base_pits[pos] as i16) - other_delta[pos];
+            return;
+        }
+
+        let is_my_pit = is_player_pit(pos, self.player);
+        let can_capture = rules.capture_enabled
+            && (!rules.capture_requires_loop || self.has_looped);
+        if is_my_pit && can_capture {
+            let opp_pit = opposite_pit(pos);
+            let opp_actual =
+                base_pits[opp_pit] as i16 + self.delta[opp_pit] + other_delta[opp_pit];
+            assert!(opp_actual >= 0, "pit underflow at index {opp_pit}");
+            if opp_actual > 0 {
+                let captured = (opp_actual + 1) as u8;
+                self.captured = self.captured.saturating_add(captured);
+                self.delta[self.my_store] += captured as i16;
+                self.delta[pos] = -(base_pits[pos] as i16) - other_delta[pos];
+                self.delta[opp_pit] = -(base_pits[opp_pit] as i16) - other_delta[opp_pit];
+                self.done = true;
+                return;
+            }
+        } else if !is_my_pit && rules.forfeit_enabled {
+            self.delta[self.opp_store] += 1;
+            self.delta[pos] = -(base_pits[pos] as i16) - other_delta[pos];
+            self.done = true;
+            return;
+        }
+
+        self.done = true;
+    }
+}
+
 /// Result of applying simultaneous moves.
 #[pyclass]
 #[derive(Clone, Copy, Debug)]
@@ -250,81 +375,54 @@ pub fn apply_simultaneous_moves(
     assert!(state.pits[p0_pit] > 0, "p0 pit is empty: {p0_pit}");
     assert!(state.pits[p1_pit] > 0, "p1 pit is empty: {p1_pit}");
 
-    // apply p0's move first
-    let result0 = apply_move(state, p0_pit, rules);
+    let base_pits = state.pits;
+    let mut p0_state = SimPlayerState::new(0, p0_pit, &base_pits);
+    let mut p1_state = SimPlayerState::new(1, p1_pit, &base_pits);
 
-    // create state for p1 where p0's chosen pit is already picked up
-    // this simulates "simultaneous" pickup
-    let mut p1_start_state = state.pits;
-    p1_start_state[p0_pit] = 0; // p0 already picked up these seeds
+    // run sowing in lock-step so relay/capture/forfeit sees the combined board.
+    while !(p0_state.done && p1_state.done) {
+        p0_state.step();
+        p1_state.step();
 
-    // apply p1's move on the state after p0 picked up (but before p0 sowed)
-    // for simplicity, we apply p1's move independently then merge
-    let mut state_for_p1 = *state;
-    state_for_p1.current_player = 1;
-    let result1 = apply_move(&state_for_p1, p1_pit, rules);
-
-    // merge the results:
-    // the final pit counts are: initial - picked_up + deposited_by_both
-    // but we need to handle capture conflicts
-
-    let mut final_pits = state.pits;
-
-    // remove seeds from both chosen pits
-    final_pits[p0_pit] = 0;
-    final_pits[p1_pit] = 0;
-
-    // calculate net changes from each player's move
-    // p0's deposits (excluding captures which go to store)
-    for i in 0..16 {
-        if i == p0_pit || i == p1_pit {
-            continue;
+        if p0_state.seeds == 0 && !p0_state.done {
+            p0_state.check_end_conditions(&base_pits, &p1_state.delta, rules);
         }
-        // add p0's deposits (difference from initial, excluding store changes from captures)
-        let p0_deposit = result0.state.pits[i].saturating_sub(state.pits[i]);
-        let p1_deposit = result1.state.pits[i].saturating_sub(state.pits[i]);
-
-        // both players' sowing adds to the pit
-        if i != P0_STORE && i != P1_STORE {
-            final_pits[i] = state.pits[i].saturating_sub(
-                if i == p0_pit { state.pits[p0_pit] } else { 0 }
-            ).saturating_sub(
-                if i == p1_pit { state.pits[p1_pit] } else { 0 }
-            ) + p0_deposit + p1_deposit;
+        if p1_state.seeds == 0 && !p1_state.done {
+            p1_state.check_end_conditions(&base_pits, &p0_state.delta, rules);
         }
     }
 
-    // handle captures - check if both tried to capture the same opposite pit
-    let p0_captured = result0.captured;
-    let p1_captured = result1.captured;
+    let mut final_pits = [0u8; 16];
+    for i in 0..16 {
+        let combined = base_pits[i] as i16 + p0_state.delta[i] + p1_state.delta[i];
+        assert!(combined >= 0, "combined pit underflow at index {i}");
+        assert!(combined <= u8::MAX as i16, "combined pit overflow at index {i}");
+        final_pits[i] = combined as u8;
+    }
 
-    // stores: add from sowing + captures
-    let p0_store_from_sow = if result0.state.pits[P0_STORE] > state.pits[P0_STORE] + result0.captured {
-        result0.state.pits[P0_STORE] - state.pits[P0_STORE] - result0.captured
-    } else if result0.extra_turn && result0.captured == 0 {
-        1 // landed in store for extra turn
-    } else {
-        result0.state.pits[P0_STORE].saturating_sub(state.pits[P0_STORE])
-    };
+    let initial_total: u16 = state.pits.iter().map(|&v| v as u16).sum();
+    let final_total: u16 = final_pits.iter().map(|&v| v as u16).sum();
+    assert!(
+        initial_total == final_total,
+        "seed count changed: {initial_total} -> {final_total}"
+    );
 
-    let p1_store_from_sow = if result1.state.pits[P1_STORE] > state.pits[P1_STORE] + result1.captured {
-        result1.state.pits[P1_STORE] - state.pits[P1_STORE] - result1.captured
-    } else if result1.extra_turn && result1.captured == 0 {
-        1 // landed in store for extra turn
-    } else {
-        result1.state.pits[P1_STORE].saturating_sub(state.pits[P1_STORE])
-    };
-
-    final_pits[P0_STORE] = state.pits[P0_STORE] + p0_store_from_sow + p0_captured;
-    final_pits[P1_STORE] = state.pits[P1_STORE] + p1_store_from_sow + p1_captured;
-
-    // extra turns: if both get extra turns, continue simultaneous
-    // if one gets extra turn, that player goes next sequentially
-    let next_player = match (result0.extra_turn, result1.extra_turn) {
-        (true, true) => 0,  // both extra turns -> p0 goes first in next simultaneous round
-        (true, false) => 0, // p0 extra turn
-        (false, true) => 1, // p1 extra turn
-        (false, false) => 0, // no extra turns, p0 starts next round
+    let next_player = match (p0_state.extra_turn, p1_state.extra_turn) {
+        (true, false) => 0,
+        (false, true) => 1,
+        _ => {
+            if p0_state.steps < p1_state.steps {
+                0
+            } else if p1_state.steps < p0_state.steps {
+                1
+            } else {
+                let mut tie_state = (p0_pit as u64) << 32 | p1_pit as u64;
+                tie_state ^= tie_state << 13;
+                tie_state ^= tie_state >> 7;
+                tie_state ^= tie_state << 17;
+                (tie_state & 1) as u8
+            }
+        }
     };
 
     SimultaneousMoveResult {
@@ -332,10 +430,10 @@ pub fn apply_simultaneous_moves(
             pits: final_pits,
             current_player: next_player,
         },
-        p0_extra_turn: result0.extra_turn,
-        p1_extra_turn: result1.extra_turn,
-        p0_captured,
-        p1_captured,
+        p0_extra_turn: p0_state.extra_turn,
+        p1_extra_turn: p1_state.extra_turn,
+        p0_captured: p0_state.captured,
+        p1_captured: p1_state.captured,
     }
 }
 
@@ -380,5 +478,44 @@ mod tests {
         assert!(result.extra_turn);
         assert_eq!(result.state.current_player, 0); // same player
         assert_eq!(result.state.pits[P0_STORE], 1);
+    }
+
+    #[test]
+    fn test_simultaneous_preserves_selected_pit_deposit() {
+        let mut pits = [0u8; 16];
+        pits[0] = 7;
+        pits[13] = 7;
+        let state = BoardState::from_pits(pits, 0);
+        let rules = RuleConfig::default();
+        let result = apply_simultaneous_moves(&state, 0, 13, &rules);
+
+        assert_eq!(result.state.pits[13], 1);
+    }
+
+    #[test]
+    fn test_simultaneous_forfeit_uses_emptied_opponent_pit() {
+        let mut pits = [0u8; 16];
+        pits[0] = 8;
+        pits[7] = 1;
+        let state = BoardState::from_pits(pits, 0);
+        let rules = RuleConfig::default();
+        let result = apply_simultaneous_moves(&state, 0, 7, &rules);
+
+        assert_eq!(result.state.pits[7], 0);
+        assert_eq!(result.state.pits[P1_STORE], 2);
+    }
+
+    #[test]
+    fn test_simultaneous_capture_clears_pit() {
+        let mut pits = [0u8; 16];
+        pits[4] = 1;
+        pits[7] = 1;
+        pits[10] = 5;
+        let state = BoardState::from_pits(pits, 0);
+        let rules = RuleConfig::default();
+        let result = apply_simultaneous_moves(&state, 4, 7, &rules);
+
+        assert_eq!(result.state.pits[10], 0);
+        assert_eq!(result.state.pits[P0_STORE], 6);
     }
 }

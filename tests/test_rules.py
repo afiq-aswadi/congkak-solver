@@ -250,6 +250,19 @@ def test_apply_simultaneous_moves_basic() -> None:
     assert result.state.pits[7] == 0 or result.state.pits[7] > 7
 
 
+def test_simultaneous_relay_uses_combined_pits() -> None:
+    pits = [0] * 16
+    pits[0] = 8
+    pits[13] = 7
+    state = BoardState.from_pits(pits, 0)
+    rules = RuleConfig.default_rules()
+
+    result = apply_simultaneous_moves(state, 0, 13, rules)
+
+    # p1 should only have the seed from their own store landing
+    assert result.state.pits[15] == 1
+
+
 def test_rules_with_start_mode() -> None:
     rules = RuleConfig(
         start_mode=StartMode.SimultaneousIndependent,

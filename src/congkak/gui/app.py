@@ -17,7 +17,12 @@ from congkak.congkak_core import (
     get_winner,
     is_terminal,
 )
-from congkak.gui.animation import SowingStep, animate_sowing
+from congkak.gui.animation import (
+    SimultaneousSowingStep,
+    SowingStep,
+    animate_simultaneous_sowing,
+    animate_sowing,
+)
 from congkak.solver.minimax import MinimaxSolver
 
 # colors
@@ -176,6 +181,154 @@ def draw_board(
     return pit_rects
 
 
+def draw_board_simultaneous(
+    screen: pygame.Surface,
+    font: pygame.font.Font,
+    step: SimultaneousSowingStep,
+) -> None:
+    """Draw the congkak board during simultaneous sowing animation."""
+    screen.fill(BG_COLOR)
+    pits = step.pits
+
+    # draw board background
+    board_w = WINDOW_WIDTH - 2 * BOARD_MARGIN
+    board_h = WINDOW_HEIGHT - 2 * BOARD_MARGIN
+    board_rect = pygame.Rect(BOARD_MARGIN, BOARD_MARGIN, board_w, board_h)
+    pygame.draw.rect(screen, BOARD_COLOR, board_rect, border_radius=20)
+
+    # calculate positions
+    start_x = BOARD_MARGIN + STORE_WIDTH + 50
+    row_y_top = WINDOW_HEIGHT // 2 - 50
+    row_y_bottom = WINDOW_HEIGHT // 2 + 50
+
+    # draw P0's store (left) - highlight if active
+    p0_store_active = step.p0_current_pos == 14
+    p1_store_active = step.p1_current_pos == 14
+    if p0_store_active and p1_store_active:
+        p0_store_color = HIGHLIGHT_COLOR  # both at same position - use gold
+    elif p0_store_active:
+        p0_store_color = P0_COLOR
+    elif p1_store_active:
+        p0_store_color = P1_COLOR
+    else:
+        p0_store_color = STORE_COLOR
+
+    p0_store_rect = pygame.Rect(
+        BOARD_MARGIN + 20, WINDOW_HEIGHT // 2 - STORE_HEIGHT // 2, STORE_WIDTH, STORE_HEIGHT
+    )
+    pygame.draw.rect(screen, p0_store_color, p0_store_rect, border_radius=15)
+    p0_store_text = font.render(str(pits[14]), True, TEXT_COLOR)
+    screen.blit(
+        p0_store_text,
+        (
+            p0_store_rect.centerx - p0_store_text.get_width() // 2,
+            p0_store_rect.centery - p0_store_text.get_height() // 2,
+        ),
+    )
+    label = font.render("P0", True, P0_COLOR)
+    screen.blit(label, (p0_store_rect.centerx - label.get_width() // 2, p0_store_rect.bottom + 5))
+
+    # draw P1's store (right) - highlight if active
+    p0_at_p1_store = step.p0_current_pos == 15
+    p1_at_p1_store = step.p1_current_pos == 15
+    if p0_at_p1_store and p1_at_p1_store:
+        p1_store_color = HIGHLIGHT_COLOR
+    elif p0_at_p1_store:
+        p1_store_color = P0_COLOR
+    elif p1_at_p1_store:
+        p1_store_color = P1_COLOR
+    else:
+        p1_store_color = STORE_COLOR
+
+    p1_store_rect = pygame.Rect(
+        WINDOW_WIDTH - BOARD_MARGIN - STORE_WIDTH - 20,
+        WINDOW_HEIGHT // 2 - STORE_HEIGHT // 2,
+        STORE_WIDTH,
+        STORE_HEIGHT,
+    )
+    pygame.draw.rect(screen, p1_store_color, p1_store_rect, border_radius=15)
+    p1_store_text = font.render(str(pits[15]), True, TEXT_COLOR)
+    screen.blit(
+        p1_store_text,
+        (
+            p1_store_rect.centerx - p1_store_text.get_width() // 2,
+            p1_store_rect.centery - p1_store_text.get_height() // 2,
+        ),
+    )
+    label = font.render("P1", True, P1_COLOR)
+    screen.blit(label, (p1_store_rect.centerx - label.get_width() // 2, p1_store_rect.bottom + 5))
+
+    # draw pits
+    for i in range(7):
+        # player 0 pits (bottom row, left to right)
+        x = start_x + i * PIT_SPACING
+        pit_idx = i
+
+        p0_here = step.p0_current_pos == pit_idx
+        p1_here = step.p1_current_pos == pit_idx
+        if p0_here and p1_here:
+            color = HIGHLIGHT_COLOR  # both at same pit
+        elif p0_here:
+            color = P0_COLOR
+        elif p1_here:
+            color = P1_COLOR
+        else:
+            color = PIT_COLOR
+
+        pygame.draw.circle(screen, color, (x, row_y_bottom), PIT_RADIUS)
+        text = font.render(str(pits[pit_idx]), True, TEXT_COLOR)
+        screen.blit(text, (x - text.get_width() // 2, row_y_bottom - text.get_height() // 2))
+
+        # player 1 pits (top row, right to left)
+        pit_idx = 13 - i
+
+        p0_here = step.p0_current_pos == pit_idx
+        p1_here = step.p1_current_pos == pit_idx
+        if p0_here and p1_here:
+            color = HIGHLIGHT_COLOR
+        elif p0_here:
+            color = P0_COLOR
+        elif p1_here:
+            color = P1_COLOR
+        else:
+            color = PIT_COLOR
+
+        pygame.draw.circle(screen, color, (x, row_y_top), PIT_RADIUS)
+        text = font.render(str(pits[pit_idx]), True, TEXT_COLOR)
+        screen.blit(text, (x - text.get_width() // 2, row_y_top - text.get_height() // 2))
+
+    # draw "Simultaneous Sowing" header
+    big_font = pygame.font.Font(None, 32)
+    header = big_font.render("SIMULTANEOUS SOWING", True, HIGHLIGHT_COLOR)
+    screen.blit(header, (WINDOW_WIDTH // 2 - header.get_width() // 2, 10))
+
+    # draw seeds in hand for both players
+    p0_hand_text = font.render(f"P0 hand: {step.p0_seeds_in_hand}", True, P0_COLOR)
+    p1_hand_text = font.render(f"P1 hand: {step.p1_seeds_in_hand}", True, P1_COLOR)
+    screen.blit(p0_hand_text, (20, WINDOW_HEIGHT - 60))
+    screen.blit(p1_hand_text, (WINDOW_WIDTH - p1_hand_text.get_width() - 20, WINDOW_HEIGHT - 60))
+
+    # draw action labels for significant events
+    action_labels = {
+        "relay": "Relay!",
+        "extra_turn": "Extra turn!",
+        "capture": "Capture!",
+        "forfeit": "Forfeit!",
+        "waiting": "Waiting...",
+    }
+
+    action_font = pygame.font.Font(None, 36)
+    if step.p0_action in action_labels:
+        p0_action_text = action_font.render(action_labels[step.p0_action], True, P0_COLOR)
+        screen.blit(p0_action_text, (20, WINDOW_HEIGHT - 90))
+
+    if step.p1_action in action_labels:
+        p1_action_text = action_font.render(action_labels[step.p1_action], True, P1_COLOR)
+        screen.blit(
+            p1_action_text, (WINDOW_WIDTH - p1_action_text.get_width() - 20, WINDOW_HEIGHT - 90)
+        )
+
+
 def draw_speed_indicator(screen: pygame.Surface, font: pygame.font.Font, delay_ms: int) -> None:
     """Draw animation speed indicator."""
     speed_text = "Speed: instant" if delay_ms == 0 else f"Speed: {delay_ms}ms  [+/-]"
@@ -324,9 +477,167 @@ def run_gui(
     turn_history: list[tuple[BoardState, int, int, list[SowingStep]]] = []
     pre_anim_state: BoardState | None = None  # state before current animation
 
+    # simultaneous animation state
+    sim_animation: Generator[SimultaneousSowingStep, None, tuple[bool, bool]] | None = None
+    sim_anim_step: SimultaneousSowingStep | None = None
+    sim_anim_history: list[SimultaneousSowingStep] = []
+    sim_anim_history_idx = 0
+    sim_pre_state: BoardState | None = None
+    sim_p0_move: int | None = None
+    sim_p1_move: int | None = None
+
     running = True
     while running:
         dt = clock.tick(60)
+
+        # handle simultaneous animation
+        if (
+            sim_animation is not None
+            or sim_anim_history_idx < len(sim_anim_history)
+            or sim_anim_step is not None
+        ):
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_q:
+                        running = False
+                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_UP):
+                        current_delay = max(0, current_delay - 50)
+                    elif event.key in (pygame.K_MINUS, pygame.K_DOWN):
+                        current_delay = min(1000, current_delay + 50)
+                    elif event.key == pygame.K_SPACE:
+                        paused = not paused
+                    elif event.key in (pygame.K_BACKSPACE, pygame.K_LEFT):
+                        if sim_anim_history_idx > 0:
+                            sim_anim_history_idx -= 1
+                            sim_anim_step = sim_anim_history[sim_anim_history_idx]
+                            step_delay = current_delay
+                            paused = True
+                    elif event.key == pygame.K_RIGHT:
+                        if sim_anim_history_idx < len(sim_anim_history):
+                            sim_anim_step = sim_anim_history[sim_anim_history_idx]
+                            sim_anim_history_idx += 1
+                            step_delay = current_delay
+                            paused = True
+                        elif sim_animation is not None:
+                            try:
+                                sim_anim_step = next(sim_animation)
+                                sim_anim_history.append(sim_anim_step)
+                                sim_anim_history_idx = len(sim_anim_history)
+                                step_delay = current_delay
+                                paused = True
+                            except StopIteration:
+                                pass  # will be handled in normal flow
+
+            # advance simultaneous animation if not paused
+            if not paused:
+                step_delay -= dt
+                if step_delay <= 0:
+                    if sim_anim_history_idx < len(sim_anim_history):
+                        sim_anim_step = sim_anim_history[sim_anim_history_idx]
+                        sim_anim_history_idx += 1
+                    elif sim_animation is not None:
+                        try:
+                            sim_anim_step = next(sim_animation)
+                            sim_anim_history.append(sim_anim_step)
+                            sim_anim_history_idx = len(sim_anim_history)
+                        except StopIteration:
+                            # animation complete - apply final state
+                            assert sim_p0_move is not None and sim_p1_move is not None
+                            result = apply_simultaneous_moves(
+                                sim_pre_state or state, sim_p0_move, sim_p1_move, rules
+                            )
+                            state = result.state
+
+                            if result.p0_extra_turn and result.p1_extra_turn:
+                                is_first_move = True
+                                if sim_state is None:
+                                    if rules.start_mode == StartMode.SimultaneousIndependent:
+                                        sim_state = SimultaneousMoveState.for_independent()
+                                    elif rules.start_mode == StartMode.SimultaneousLeaderFollower:
+                                        leader = determine_leader(rules.leader_selection)
+                                        sim_state = SimultaneousMoveState.for_leader_follower(
+                                            leader
+                                        )
+                                else:
+                                    sim_state.reset()
+                            else:
+                                is_first_move = False
+                                sim_state = None
+
+                            sim_animation = None
+                            sim_anim_step = None
+                            sim_anim_history = []
+                            sim_anim_history_idx = 0
+                            sim_pre_state = None
+                            sim_p0_move = None
+                            sim_p1_move = None
+
+                            if is_terminal(state):
+                                game_over = True
+                    else:
+                        # finished replaying from history, apply move
+                        assert sim_p0_move is not None and sim_p1_move is not None
+                        result = apply_simultaneous_moves(
+                            sim_pre_state or state, sim_p0_move, sim_p1_move, rules
+                        )
+                        state = result.state
+
+                        if result.p0_extra_turn and result.p1_extra_turn:
+                            is_first_move = True
+                            if sim_state is None:
+                                if rules.start_mode == StartMode.SimultaneousIndependent:
+                                    sim_state = SimultaneousMoveState.for_independent()
+                                elif rules.start_mode == StartMode.SimultaneousLeaderFollower:
+                                    leader = determine_leader(rules.leader_selection)
+                                    sim_state = SimultaneousMoveState.for_leader_follower(leader)
+                            else:
+                                sim_state.reset()
+                        else:
+                            is_first_move = False
+                            sim_state = None
+
+                        sim_animation = None
+                        sim_anim_step = None
+                        sim_anim_history = []
+                        sim_anim_history_idx = 0
+                        sim_pre_state = None
+                        sim_p0_move = None
+                        sim_p1_move = None
+
+                        if is_terminal(state):
+                            game_over = True
+
+                    # set delay for next step
+                    if sim_anim_step is not None:
+                        if sim_anim_step.p0_action in (
+                            "relay",
+                            "extra_turn",
+                            "capture",
+                            "forfeit",
+                        ) or sim_anim_step.p1_action in (
+                            "relay",
+                            "extra_turn",
+                            "capture",
+                            "forfeit",
+                        ):
+                            step_delay = current_delay * 3
+                        else:
+                            step_delay = current_delay
+
+            # draw simultaneous animation frame
+            if sim_anim_step is not None:
+                draw_board_simultaneous(screen, font, sim_anim_step)
+                draw_speed_indicator(screen, font, current_delay)
+                if paused:
+                    pause_text = font.render("PAUSED [Space]  [Left/Right]", True, (200, 50, 50))
+                    screen.blit(
+                        pause_text,
+                        (WINDOW_WIDTH // 2 - pause_text.get_width() // 2, WINDOW_HEIGHT - 30),
+                    )
+            pygame.display.flip()
+            continue
 
         # handle animation
         if animation is not None or anim_history_idx < len(anim_history) or anim_step is not None:
@@ -545,6 +856,13 @@ def run_gui(
                     elif event.key == pygame.K_r:
                         state = BoardState.initial()
                         is_first_move = True
+                        sim_animation = None
+                        sim_anim_step = None
+                        sim_anim_history = []
+                        sim_anim_history_idx = 0
+                        sim_pre_state = None
+                        sim_p0_move = None
+                        sim_p1_move = None
                         if rules.start_mode == StartMode.SimultaneousIndependent:
                             sim_state = SimultaneousMoveState.for_independent()
                         elif rules.start_mode == StartMode.SimultaneousLeaderFollower:
@@ -584,14 +902,30 @@ def run_gui(
                 p1_move = sim_state.p1_move
                 assert p0_move is not None and p1_move is not None
 
-                # apply simultaneous moves
-                result = apply_simultaneous_moves(state, p0_move, p1_move, rules)
-                state = result.state
-                is_first_move = False
-                sim_state = None
+                if current_delay > 0:
+                    # start simultaneous animation
+                    sim_pre_state = state
+                    sim_p0_move = p0_move
+                    sim_p1_move = p1_move
+                    sim_animation = animate_simultaneous_sowing(state, p0_move, p1_move, rules)
+                    sim_anim_history = []
+                    sim_anim_history_idx = 0
+                    paused = False
+                    step_delay = 0
+                    continue  # go to simultaneous animation handling
+                else:
+                    # instant mode: apply immediately
+                    result = apply_simultaneous_moves(state, p0_move, p1_move, rules)
+                    state = result.state
+                    if result.p0_extra_turn and result.p1_extra_turn:
+                        is_first_move = True
+                        sim_state.reset()
+                    else:
+                        is_first_move = False
+                        sim_state = None
 
-                if is_terminal(state):
-                    game_over = True
+                    if is_terminal(state):
+                        game_over = True
                 # fall through to normal game loop after simultaneous execution
             else:
                 # draw simultaneous mode status
@@ -620,6 +954,14 @@ def run_gui(
                     anim_history_idx = 0
                     turn_history = []
                     pre_anim_state = None
+                    # reset simultaneous animation state
+                    sim_animation = None
+                    sim_anim_step = None
+                    sim_anim_history = []
+                    sim_anim_history_idx = 0
+                    sim_pre_state = None
+                    sim_p0_move = None
+                    sim_p1_move = None
                     # reset simultaneous state
                     is_first_move = True
                     if rules.start_mode == StartMode.SimultaneousIndependent:
